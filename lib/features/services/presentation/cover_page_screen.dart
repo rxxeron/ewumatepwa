@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
-import 'package:open_filex/open_filex.dart';
-import 'dart:io';
+import '../../../core/utils/pdf_saver.dart';
 import '../../../core/services/azure_functions_service.dart';
 import 'package:ewumate/core/providers/academic_providers.dart';
 import 'package:ewumate/core/repositories/progress_repository.dart';
@@ -236,15 +234,8 @@ class _CoverPageScreenState extends ConsumerState<CoverPageScreen> {
 
       if (response.statusCode == 200) {
         final bytes = response.bodyBytes;
-        
-        // Save to temporary file
-        final tempDir = await getTemporaryDirectory();
-        final filePath = '${tempDir.path}/academic_report_${DateTime.now().millisecondsSinceEpoch}.pdf';
-        final file = File(filePath);
-        await file.writeAsBytes(bytes);
-        
-        // Open the file
-        await OpenFilex.open(filePath);
+        final fileName = 'academic_report_${DateTime.now().millisecondsSinceEpoch}.pdf';
+        await saveAndOpenPdf(bytes, fileName);
       } else {
         throw 'Server returned error: ${response.body}';
       }

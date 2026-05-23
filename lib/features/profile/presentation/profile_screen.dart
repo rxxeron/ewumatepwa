@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -363,17 +362,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         );
       }
 
-      final file = File(xFile.path);
+      final fileBytes = await xFile.readAsBytes();
       // Fixed filename to prevent storage bloat (one avatar per user)
       final fileExt = xFile.path.split('.').last.toLowerCase();
       final fileName = '${user.id}/avatar.$fileExt';
 
-      // 1. Upload to Storage
+      // 1. Upload to Storage using binary bytes to support web and mobile seamlessly
       await Supabase.instance.client.storage
           .from('profile_images')
-          .upload(
+          .uploadBinary(
             fileName,
-            file,
+            fileBytes,
             fileOptions: const FileOptions(cacheControl: '0', upsert: true),
           );
 

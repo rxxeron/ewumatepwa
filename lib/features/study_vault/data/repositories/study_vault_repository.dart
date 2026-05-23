@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,14 +50,13 @@ class StudyVaultRepository {
   }
 
   Future<void> uploadMaterial({
-    required File file,
+    required Uint8List fileBytes,
     required String fileName,
     required String? facultyInitial,
     required String? courseCode,
     required String? semester,
     required String? fileType,
   }) async {
-    final fileBytes = await file.readAsBytes();
     final fileSizeBytes = fileBytes.length;
 
     // 1. Get Resumable Upload URL from Edge Function

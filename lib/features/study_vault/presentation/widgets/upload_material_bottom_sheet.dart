@@ -13,7 +13,7 @@ class UploadMaterialBottomSheet extends ConsumerStatefulWidget {
 }
 
 class _UploadMaterialBottomSheetState extends ConsumerState<UploadMaterialBottomSheet> {
-  File? _selectedFile;
+  PlatformFile? _platformFile;
   String? _fileName;
   String? _fileType;
   bool _isUploading = false;
@@ -37,16 +37,16 @@ class _UploadMaterialBottomSheetState extends ConsumerState<UploadMaterialBottom
       type: FileType.any,
     );
 
-    if (result != null && result.files.single.path != null) {
+    if (result != null) {
       setState(() {
-        _selectedFile = File(result.files.single.path!);
+        _platformFile = result.files.single;
         _fileName = result.files.single.name;
       });
     }
   }
 
   Future<void> _upload() async {
-    if (_selectedFile == null) {
+    if (_platformFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please select a file')));
       return;
     }
@@ -67,8 +67,15 @@ class _UploadMaterialBottomSheetState extends ConsumerState<UploadMaterialBottom
 
     try {
       final repository = ref.read(studyVaultRepositoryProvider);
+      
+      final bytes = _platformFile!.bytes;
+      if (bytes == null && _platformFile!.path == null) {
+        throw Exception("No file data available");
+      }
+      final fileBytes = bytes ?? await File(_platformFile!.path!).readAsBytes();
+
       await repository.uploadMaterial(
-        file: _selectedFile!,
+        fileBytes: fileBytes,
         fileName: _fileName ?? 'Unknown',
         facultyInitial: faculty.toUpperCase(),
         courseCode: course.toUpperCase(),

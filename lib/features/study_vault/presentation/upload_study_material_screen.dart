@@ -159,13 +159,18 @@ class _UploadStudyMaterialScreenState extends ConsumerState<UploadStudyMaterialS
       final repository = ref.read(studyVaultRepositoryProvider);
       
       for (var file in _selectedFiles) {
-        final filePath = file.path;
-        if (filePath == null) continue;
+        final key = file.path ?? file.name;
+        final type = _fileTypesSelection[key] ?? 'Other';
         
-        final type = _fileTypesSelection[filePath] ?? 'Other';
+        final bytes = file.bytes;
+        if (bytes == null && file.path == null) {
+          throw Exception("No file data available for ${file.name}");
+        }
+        
+        final fileBytes = bytes ?? await File(file.path!).readAsBytes();
         
         await repository.uploadMaterial(
-          file: File(filePath),
+          fileBytes: fileBytes,
           fileName: file.name,
           facultyInitial: _facultyInitial!,
           courseCode: _courseCode!,
