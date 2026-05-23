@@ -41,11 +41,25 @@
   <!-- Redirect non-root paths to index.html for SPA routing (GitHub Pages fix) -->
   <script>
     (function() {
-      // If we're not on the root page and don't have a hash, redirect to root
-      var path = window.location.pathname;
-      if (path !== '/' && !path.endsWith('.html') && window.location.hash === '') {
-        window.location.href = window.location.origin + '/';
+      // Only redirect for regular navigation, not popups or OAuth callbacks
+      var protocol = window.location.protocol;
+      var hash = window.location.hash;
+      var pathname = window.location.pathname;
+      
+      // Skip if blob protocol (popup) or already has hash
+      if (protocol === 'blob:' || hash !== '' || pathname === '/') {
         return;
+      }
+      
+      // Skip if it's an OAuth/callback URL (has 'state' or 'code' params)
+      var params = new URLSearchParams(window.location.search);
+      if (params.has('state') || params.has('code') || params.has('error')) {
+        return;
+      }
+      
+      // Redirect non-root paths
+      if (!pathname.endsWith('.html') && pathname !== '/') {
+        window.location.href = window.location.origin + '/';
       }
     })();
   </script>

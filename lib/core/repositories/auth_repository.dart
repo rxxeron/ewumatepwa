@@ -76,16 +76,13 @@ class AuthRepository {
   }
 
   // Google Sign In - Redirect based (works better on web)
-  Future<AuthResponse> signInWithGoogle() async {
+  Future<bool> signInWithGoogle() async {
     // Use Supabase's built-in OAuth for redirect-based flow
-    final response = await _supabase.auth.signInWithOAuth(
+    // Returns true if redirect URL was generated (user will be redirected)
+    return await _supabase.auth.signInWithOAuth(
       OAuthProvider.google,
       redirectTo: 'https://app.ewumate.pro.bd',
     );
-
-    // On web, this will redirect. On mobile, it opens the OAuth page.
-    // If redirectUrl is returned, we need to handle it
-    return response;
   }
 
 }
