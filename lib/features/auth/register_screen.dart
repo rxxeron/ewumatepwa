@@ -418,8 +418,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       onPressed: _loading ? null : _googleLogin,
-                      icon: Image.network(
-                        'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png',
+                      icon: Image.asset(
+                        'assets/googleg_48dp.png',
                         height: 20,
                         errorBuilder: (context, error, stackTrace) {
                           return Container(

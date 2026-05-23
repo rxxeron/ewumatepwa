@@ -210,8 +210,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Image.network(
-                            'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png',
+                          Image.asset(
+                            'assets/googleg_48dp.png',
                             height: 20,
                             errorBuilder: (context, error, stackTrace) {
                               return Container(
