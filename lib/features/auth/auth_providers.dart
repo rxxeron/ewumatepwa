@@ -6,7 +6,7 @@ import '../../core/services/cache_service.dart';
 import '../../core/repositories/auth_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-final profileProvider = StreamProvider<Profile?>((ref) async* {
+final profileProvider = FutureProvider<Profile?>((ref) async {
   final authRepo = ref.watch(authRepositoryProvider);
   final user = authRepo.currentUser;
   final cacheService = ref.read(cacheServiceProvider);
@@ -15,46 +15,42 @@ final profileProvider = StreamProvider<Profile?>((ref) async* {
   if (effectiveUserId == null) {
     effectiveUserId = cacheService.getLastUserId();
     if (effectiveUserId == null) {
-      yield null;
-      return;
+      return null;
     }
   }
-  
+
   final userId = effectiveUserId;
 
-  // 1. Yield Cache Immediately (Frame 1)
+  // 1. Try Cache First
   final cachedData = cacheService.getCachedProfile(userId);
   if (cachedData != null) {
-    debugPrint("[ProfileProvider] Serving Cache instantly on Frame 1...");
-    yield Profile.fromJson(cachedData);
+    debugPrint("[ProfileProvider] Serving Cache...");
+    return Profile.fromJson(cachedData);
   }
 
-  // 2. Background retry loop for online updates
-  while (true) {
-    try {
-      debugPrint("[ProfileProvider] Attempting Online Fetch for: $userId");
-      final profile = await authRepo.getProfile(userId).timeout(
-        const Duration(seconds: 10),
-      );
-      
-      if (profile != null) {
-        cacheService.cacheProfile(userId, profile.toJson());
-        yield profile;
-        break; 
-      }
-    } catch (e) {
-      debugPrint("[ProfileProvider] Online failed: $e");
-      
-      // Retry every 5 seconds until success
-      await Future.delayed(const Duration(seconds: 5));
+  // 2. Try Online Fetch (with timeout)
+  try {
+    debugPrint("[ProfileProvider] Attempting Online Fetch for: $userId");
+    final profile = await authRepo.getProfile(userId).timeout(
+      const Duration(seconds: 10),
+    );
+
+    if (profile != null) {
+      cacheService.cacheProfile(userId, profile.toJson());
+      return profile;
     }
+    return null;
+  } catch (e) {
+    debugPrint("[ProfileProvider] Online failed: $e");
+    // Return null instead of retrying forever - CheckAuthScreen handles the null case
+    return null;
   }
 });
 
 final authStateProvider = StreamProvider<AuthState>((ref) async* {
   final client = Supabase.instance.client;
   // Tracing log removed for release
-  
+
   // 1. Emit the current session immediately
   final initialSession = client.auth.currentSession;
   yield AuthState(AuthChangeEvent.initialSession, initialSession);
