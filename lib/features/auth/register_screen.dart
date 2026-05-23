@@ -434,7 +434,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                 "G",
                                 style: TextStyle(
                                   color: Colors.black,
-                                  fontWeight: FontWeight.black,
+                                  fontWeight: FontWeight.w900,
                                   fontSize: 14,
                                 ),
                               ),

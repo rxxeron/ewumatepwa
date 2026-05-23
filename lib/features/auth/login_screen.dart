@@ -226,7 +226,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     "G",
                                     style: TextStyle(
                                       color: Colors.black,
-                                      fontWeight: FontWeight.black,
+                                      fontWeight: FontWeight.w900,
                                       fontSize: 14,
                                     ),
                                   ),
