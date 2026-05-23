@@ -31,6 +31,9 @@ jobs:
       - name: Create .env file from secret
         run: echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
 
+      - name: Copy .env to assets for flutter_dotenv web support
+        run: cp .env assets/.env
+
       - name: Install dependencies
         run: flutter pub get
 
