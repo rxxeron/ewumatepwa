@@ -107,10 +107,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     setState(() => _loading = true);
     try {
       await ref.read(authRepositoryProvider).signInWithGoogle();
-      ref.invalidate(profileProvider);
-      if (mounted) {
-        context.go('/');
-      }
+      // Note: On web, this redirects to Google and back. No need to navigate manually.
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
