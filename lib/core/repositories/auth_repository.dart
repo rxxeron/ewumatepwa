@@ -84,7 +84,6 @@ class AuthRepository {
       redirectTo: 'https://app.ewumate.pro.bd',
     );
   }
-
 }
 
 @riverpod
