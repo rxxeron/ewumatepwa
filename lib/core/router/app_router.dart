@@ -39,6 +39,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/',
+    // Use hash routing for GitHub Pages compatibility
     routes: [
       GoRoute(path: '/', builder: (context, state) => const CheckAuthScreen()),
 
