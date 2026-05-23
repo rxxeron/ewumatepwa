@@ -186,13 +186,15 @@ class DashboardRepository {
           try {
             // Manual HTTP call to bypass the automatic JWT/Authorization header injection
             // which was triggering 401 Invalid JWT errors.
-            final functionsUrl = '${dotenv.env['SUPABASE_URL']!}/functions/v1';
+            final supaUrl = dotenv.env['SUPABASE_URL'] ?? 'https://jwygjihrbwxhehijldiz.supabase.co';
+            final functionsUrl = '$supaUrl/functions/v1';
             final uri = Uri.parse('$functionsUrl/sync-schedule');
+            final supaAnon = dotenv.env['SUPABASE_ANON_KEY'] ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3eWdqaWhyYnd4aGVoaWpsZGl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExMDQxNzQsImV4cCI6MjA4NjY4MDE3NH0.zQc3dq53HBpMeN0rbJA9soF0oYhl7de1_sNnB_9JPoM';
             await http.post(
               uri,
               headers: {
                 'Content-Type': 'application/json',
-                'apikey': dotenv.env['SUPABASE_ANON_KEY']!,
+                'apikey': supaAnon,
               },
               body: jsonEncode({
                 'user_id': user.id,
@@ -383,13 +385,15 @@ class DashboardRepository {
   Future<void> syncWeeklySchedule(String userId) async {
     try {
       debugPrint('[Dashboard] Proactively triggering sync-schedule (No-JWT) for: $userId');
-      final functionsUrl = '${dotenv.env['SUPABASE_URL']!}/functions/v1';
+      final supaUrl = dotenv.env['SUPABASE_URL'] ?? 'https://jwygjihrbwxhehijldiz.supabase.co';
+      final functionsUrl = '$supaUrl/functions/v1';
       final uri = Uri.parse('$functionsUrl/sync-schedule');
+      final supaAnon = dotenv.env['SUPABASE_ANON_KEY'] ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3eWdqaWhyYnd4aGVoaWpsZGl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExMDQxNzQsImV4cCI6MjA4NjY4MDE3NH0.zQc3dq53HBpMeN0rbJA9soF0oYhl7de1_sNnB_9JPoM';
       await http.post(
         uri,
         headers: {
           'Content-Type': 'application/json',
-          'apikey': dotenv.env['SUPABASE_ANON_KEY']!,
+          'apikey': supaAnon,
         },
         body: jsonEncode({
           'user_id': userId,
@@ -650,13 +654,15 @@ class DashboardRepository {
 
       if (weeklyGrid.isEmpty) {
         try {
-          final functionsUrl = '${dotenv.env['SUPABASE_URL']!}/functions/v1';
+          final supaUrl = dotenv.env['SUPABASE_URL'] ?? 'https://jwygjihrbwxhehijldiz.supabase.co';
+          final functionsUrl = '$supaUrl/functions/v1';
           final uri = Uri.parse('$functionsUrl/sync-schedule');
+          final supaAnon = dotenv.env['SUPABASE_ANON_KEY'] ?? 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp3eWdqaWhyYnd4aGVoaWpsZGl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzExMDQxNzQsImV4cCI6MjA4NjY4MDE3NH0.zQc3dq53HBpMeN0rbJA9soF0oYhl7de1_sNnB_9JPoM';
           await http.post(
             uri,
             headers: {
               'Content-Type': 'application/json',
-              'apikey': dotenv.env['SUPABASE_ANON_KEY']!,
+              'apikey': supaAnon,
             },
             body: jsonEncode({
               'user_id': user.id,

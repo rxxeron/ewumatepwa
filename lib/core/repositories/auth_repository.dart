@@ -79,7 +79,7 @@ class AuthRepository {
   // Google Sign In
   Future<AuthResponse> signInWithGoogle() async {
     final googleSignIn = GoogleSignIn(
-      serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
+      serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '561956344734-ulqeqls9u4h1hmpec41l9lufk336a9ga.apps.googleusercontent.com',
     );
 
     // Force the account picker

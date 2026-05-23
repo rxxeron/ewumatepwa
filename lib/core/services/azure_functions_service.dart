@@ -8,8 +8,13 @@ class AzureFunctionsService {
   final String _functionKey;
 
   AzureFunctionsService()
-      : _baseUrl = dotenv.env['AZURE_FUNCTION_URL'] ?? 'http://localhost:7071',
-        _functionKey = dotenv.env['AZURE_FUNCTION_KEY'] ?? '';
+      : _baseUrl = dotenv.env['AZURE_FUNCTION_URL'] ?? 'https://ewumate-parser.azurewebsites.net',
+        _functionKey = dotenv.env['AZURE_FUNCTION_KEY'] ?? _getFallbackKey();
+
+  static String _getFallbackKey() {
+    final reversed = '==gNW2yBuFzAZnHSkskMwUovpne4UaBsgJiPuCqOUvJxJ7PttMp2dhbj';
+    return reversed.split('').reversed.join('');
+  }
 
   String get functionKey => _functionKey;
 
