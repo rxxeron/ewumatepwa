@@ -10,6 +10,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'firebase_options.dart';
 import 'core/providers/session_guardian.dart';
 import 'core/repositories/auth_repository.dart';
+
+/// Whether Firebase was successfully initialized (false on web).
+bool _firebaseInitialized = false;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -17,12 +20,16 @@ void main() async {
   final cacheService = CacheService();
   await cacheService.init();
 
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } catch (e) {
-    if (kDebugMode) debugPrint('Firebase init error: $e');
+  // Firebase is only configured for Android/iOS — skip entirely on web.
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      _firebaseInitialized = true;
+    } catch (e) {
+      if (kDebugMode) debugPrint('Firebase init error: $e');
+    }
   }
 
   try {
@@ -52,15 +59,23 @@ class MyApp extends ConsumerWidget {
     // Initialize Session Guardian
     ref.read(sessionGuardianProvider);
     
-    // Initialize FCM when user is logged in
-    ref.listen(authStateProvider, (previous, next) {
-      final event = next.value?.event;
-      if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession) {
-        ref.read(fcmServiceProvider).initialize().catchError((err) {
-          if (kDebugMode) debugPrint('FCM Init Error: $err');
-        });
-      }
-    });
+    // Initialize FCM when user is logged in — mobile only.
+    // On web, Firebase/FCM is not configured, so skip entirely to prevent
+    // synchronous throws from FirebaseMessaging.instance.
+    if (_firebaseInitialized) {
+      ref.listen(authStateProvider, (previous, next) {
+        final event = next.value?.event;
+        if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession) {
+          try {
+            ref.read(fcmServiceProvider).initialize().catchError((err) {
+              if (kDebugMode) debugPrint('FCM Init Error: $err');
+            });
+          } catch (e) {
+            if (kDebugMode) debugPrint('FCM provider creation failed: $e');
+          }
+        }
+      });
+    }
     
     final router = ref.watch(appRouterProvider);
 
