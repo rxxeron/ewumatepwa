@@ -28,6 +28,9 @@ jobs:
           flutter-version: '3.27.0'
           channel: 'stable'
 
+      - name: Create .env file from secret
+        run: echo "${{ secrets.ENV_FILE_CONTENT }}" > .env
+
       - name: Install dependencies
         run: flutter pub get
 
