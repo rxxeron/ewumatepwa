@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../router/app_router.dart';
 import '../widgets/glass_kit.dart';
 import '../repositories/notification_repository.dart';
@@ -73,7 +74,8 @@ class FCMService {
     );
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      final token = await _messaging.getToken();
+      final vapidKey = kIsWeb ? (dotenv.env['FCM_VAPID_KEY'] ?? 'YOUR_VAPID_KEY_HERE') : null;
+      final token = await _messaging.getToken(vapidKey: vapidKey);
       if (token != null) {
         await _saveTokenToDatabase(token);
       }

@@ -24,16 +24,14 @@ void main() async {
   final cacheService = CacheService();
   await cacheService.init();
 
-  // Firebase is only configured for Android/iOS — skip entirely on web.
-  if (!kIsWeb) {
-    try {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      _firebaseInitialized = true;
-    } catch (e) {
-      if (kDebugMode) debugPrint('Firebase init error: $e');
-    }
+  // Initialize Firebase across all supported platforms (Mobile & Web PWA)
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    _firebaseInitialized = true;
+  } catch (e) {
+    if (kDebugMode) debugPrint('Firebase init error: $e');
   }
 
   try {
@@ -68,9 +66,7 @@ class MyApp extends ConsumerWidget {
       ref.read(updateListenerProvider);
     }
     
-    // Initialize FCM when user is logged in — mobile only.
-    // On web, Firebase/FCM is not configured, so skip entirely to prevent
-    // synchronous throws from FirebaseMessaging.instance.
+    // Initialize FCM when the user is logged in
     if (_firebaseInitialized) {
       ref.listen(authStateProvider, (previous, next) {
         final event = next.value?.event;
