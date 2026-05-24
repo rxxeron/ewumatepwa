@@ -56,3 +56,12 @@ self.addEventListener('notificationclick', (event) => {
     })
   );
 });
+
+// Force immediate service worker activation
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
+});
