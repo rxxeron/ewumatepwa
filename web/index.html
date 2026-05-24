@@ -32,11 +32,76 @@
   <meta name="apple-mobile-web-app-title" content="EWUmate">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
+  <!-- iOS Startup Splash Screens (Dark Mode #0F172A Theme) -->
+  <!-- iPhone 15 Pro Max, 14 Pro Max -->
+  <link rel="apple-touch-startup-image" href="icons/Icon-maskable-512.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (prefers-color-scheme: dark)">
+  <!-- iPhone 15 Pro, 15, 14 Pro -->
+  <link rel="apple-touch-startup-image" href="icons/Icon-maskable-512.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (prefers-color-scheme: dark)">
+  <!-- iPhone 14 Plus, 13 Pro Max, 12 Pro Max -->
+  <link rel="apple-touch-startup-image" href="icons/Icon-maskable-512.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (prefers-color-scheme: dark)">
+  <!-- iPhone 14, 13 Pro, 13, 12 Pro, 12 -->
+  <link rel="apple-touch-startup-image" href="icons/Icon-maskable-512.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (prefers-color-scheme: dark)">
+  <!-- iPhone SE (3rd Gen), SE (2nd Gen), 8, 7 -->
+  <link rel="apple-touch-startup-image" href="icons/Icon-maskable-192.png" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (prefers-color-scheme: dark)">
+
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
   <title>EWUmate</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- JS PWA and Update Bridge -->
+  <script>
+    // Deferred install prompt storage
+    window.deferredPrompt = null;
+    window.onAppInstallableCallback = null;
+    window.onAppInstalledCallback = null;
+    window.onServiceWorkerUpdateCallback = null;
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      window.deferredPrompt = e;
+      if (window.onAppInstallableCallback) {
+        window.onAppInstallableCallback();
+      }
+    });
+
+    window.addEventListener('appinstalled', (e) => {
+      window.deferredPrompt = null;
+      if (window.onAppInstalledCallback) {
+        window.onAppInstalledCallback();
+      }
+    });
+
+    window.isPWAInstallable = function() {
+      return window.deferredPrompt !== null;
+    };
+
+    window.triggerPWAInstall = async function() {
+      const promptEvent = window.deferredPrompt;
+      if (!promptEvent) return false;
+      promptEvent.prompt();
+      const { outcome } = await promptEvent.userChoice;
+      window.deferredPrompt = null;
+      return outcome === 'accepted';
+    };
+
+    // Listen to updates from Service Worker
+    navigator.serviceWorker.getRegistration().then((reg) => {
+      if (!reg) return;
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (newWorker == null) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            if (window.onServiceWorkerUpdateCallback) {
+              window.onServiceWorkerUpdateCallback();
+            }
+          }
+        });
+      });
+    });
+  </script>
 
   <!-- Redirect non-root paths to index.html for SPA routing (GitHub Pages fix) -->
   <script>

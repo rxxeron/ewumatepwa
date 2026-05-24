@@ -1,12 +1,15 @@
 {
     "name": "EWUmate",
     "short_name": "EWUmate",
+    "id": "/ewumate_pwa/",
     "start_url": ".",
     "display": "standalone",
+    "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
     "background_color": "#0F172A",
     "theme_color": "#0F172A",
     "description": "Premium Mobile Assistant for East West University Students",
     "orientation": "portrait-primary",
+    "categories": ["education", "productivity", "utilities"],
     "prefer_related_applications": false,
     "icons": [
         {
@@ -30,6 +33,38 @@
             "sizes": "512x512",
             "type": "image/png",
             "purpose": "maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Class Routine",
+            "short_name": "Routine",
+            "description": "View your schedule and routine",
+            "url": "./#/schedule-manager",
+            "icons": [{ "src": "icons/Icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "Marks Tracker",
+            "short_name": "Marks",
+            "description": "Check and log academic progress",
+            "url": "./#/semester-progress",
+            "icons": [{ "src": "icons/Icon-192.png", "sizes": "192x192" }]
+        },
+        {
+            "name": "My Tasks",
+            "short_name": "Tasks",
+            "description": "Manage assignments and reminders",
+            "url": "./#/tasks",
+            "icons": [{ "src": "icons/Icon-192.png", "sizes": "192x192" }]
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "favicon.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "form_factor": "narrow",
+            "label": "EWUMate Student Portal"
         }
     ]
 }

@@ -1,5 +1,7 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/foundation.dart';
 import '../providers/supabase_provider.dart';
 import '../services/cache_service.dart';
 import '../models/profile.dart';
@@ -75,14 +77,50 @@ class AuthRepository {
     }
   }
 
-  // Google Sign In - Redirect based (works better on web)
+  // Google Sign In - Popup-based on web to preserve standalone PWA context, dynamic redirect/native deep link on mobile
   Future<bool> signInWithGoogle() async {
-    // Use Supabase's built-in OAuth for redirect-based flow
-    // Returns true if redirect URL was generated (user will be redirected)
-    return await _supabase.auth.signInWithOAuth(
-      OAuthProvider.google,
-      redirectTo: 'https://app.ewumate.pro.bd',
-    );
+    if (kIsWeb) {
+      try {
+        final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '561956344734-ulqeqls9u4h1hmpec41l9lufk336a9ga.apps.googleusercontent.com';
+        final GoogleSignIn googleSignIn = GoogleSignIn(
+          clientId: webClientId,
+        );
+
+        final googleUser = await googleSignIn.signIn();
+        if (googleUser == null) {
+          debugPrint('[AuthRepository] Google Sign-In aborted by user.');
+          return false;
+        }
+
+        final googleAuth = await googleUser.authentication;
+        final idToken = googleAuth.idToken;
+        final accessToken = googleAuth.accessToken;
+
+        if (idToken == null) {
+          throw const AuthException('Could not retrieve Google ID Token.');
+        }
+
+        final response = await _supabase.auth.signInWithIdToken(
+          provider: OAuthProvider.google,
+          idToken: idToken,
+          accessToken: accessToken,
+        );
+
+        if (response.user != null) {
+          await _cache.saveLastUserId(response.user!.id);
+        }
+        return true;
+      } catch (e, stack) {
+        debugPrint('[AuthRepository] Google Web Sign-In failed: $e\n$stack');
+        rethrow;
+      }
+    } else {
+      // Mobile native deep-link callback
+      return await _supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: 'io.supabase.ewumate://login-callback',
+      );
+    }
   }
 }
 

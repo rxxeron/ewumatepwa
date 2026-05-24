@@ -10,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'firebase_options.dart';
 import 'core/providers/session_guardian.dart';
 import 'core/repositories/auth_repository.dart';
+import 'core/services/update_service.dart';
 
 /// Whether Firebase was successfully initialized (false on web).
 bool _firebaseInitialized = false;
@@ -58,6 +59,11 @@ class MyApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Initialize Session Guardian
     ref.read(sessionGuardianProvider);
+    
+    // Initialize PWA / Service Worker update listener
+    if (kIsWeb) {
+      ref.read(updateListenerProvider);
+    }
     
     // Initialize FCM when user is logged in — mobile only.
     // On web, Firebase/FCM is not configured, so skip entirely to prevent

@@ -35,6 +35,7 @@ import '../../core/utils/time_utils.dart';
 import '../../core/services/cache_service.dart';
 import 'hero_card.dart';
 import 'schedule_card.dart';
+import 'pwa_install_banner.dart';
 import 'package:home_widget/home_widget.dart';
 
 
@@ -483,6 +484,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                          FadeInSlide(delay: const Duration(milliseconds: 50), child: const PwaInstallBanner()),
                           FadeInSlide(delay: const Duration(milliseconds: 100), child: _buildAppUpdateBanner()),
                           FadeInSlide(delay: const Duration(milliseconds: 150), child: _buildTransitionBanner()),
                         FadeInSlide(delay: const Duration(milliseconds: 200), child: _buildAdvisingBanner()),
