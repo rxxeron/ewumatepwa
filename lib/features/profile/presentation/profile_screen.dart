@@ -10,6 +10,7 @@ import '../../../core/repositories/auth_repository.dart';
 import '../../../core/repositories/profile_repository.dart';
 import '../../../core/repositories/progress_repository.dart';
 import '../../../core/services/cache_service.dart';
+import '../../../core/services/fcm_service.dart';
 import '../../../core/models/profile.dart';
 import '../../../core/utils/error_utils.dart';
 import '../../../core/utils/refresh_utils.dart';
@@ -540,6 +541,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 32),
+                _buildSectionTitle('Notifications'),
+                const SizedBox(height: 16),
+                _buildNotificationPermissionCard(),
                 const SizedBox(height: 32),
                 _buildSectionTitle('Security'),
                 const SizedBox(height: 16),
@@ -562,6 +566,95 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         },
       ),
     ),
+    );
+  }
+
+  Widget _buildNotificationPermissionCard() {
+    return FutureBuilder<bool>(
+      future: ref.read(fcmServiceProvider).isPermissionGranted(),
+      builder: (context, snapshot) {
+        final isGranted = snapshot.data ?? false;
+
+        return InkWell(
+          onTap: isGranted
+              ? null
+              : () async {
+                  final success = await ref
+                      .read(fcmServiceProvider)
+                      .requestPermissionAndRegister();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          success
+                              ? 'Push notifications enabled!'
+                              : 'Permission denied. Enable from browser settings.',
+                        ),
+                        backgroundColor: success ? Colors.green : Colors.orange,
+                      ),
+                    );
+                    setState(() {}); // Rebuild to reflect new status
+                  }
+                },
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E2836),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isGranted
+                      ? Icons.notifications_active
+                      : Icons.notifications_off_outlined,
+                  color: isGranted ? Colors.cyanAccent : Colors.grey[400],
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Push Notifications',
+                        style: TextStyle(fontSize: 16, color: Colors.white),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isGranted
+                            ? 'Notifications are enabled'
+                            : 'Tap to enable push notifications',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isGranted)
+                  const Icon(Icons.check_circle, color: Colors.cyanAccent, size: 22)
+                else
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.cyanAccent.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.cyanAccent.withOpacity(0.4)),
+                    ),
+                    child: const Text(
+                      'Enable',
+                      style: TextStyle(
+                        color: Colors.cyanAccent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

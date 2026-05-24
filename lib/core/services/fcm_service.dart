@@ -68,20 +68,21 @@ class FCMService {
       sound: true,
     );
 
-    NotificationSettings settings = await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
-    print("[FCM] AuthorizationStatus: ${settings.authorizationStatus}");
+    // Check permission status silently without prompting on startup (mandatory for iOS Safari)
+    NotificationSettings settings = await _messaging.getNotificationSettings();
+    print("[FCM] Current AuthorizationStatus on startup: ${settings.authorizationStatus}");
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      final vapidKey = kIsWeb ? (dotenv.env['FCM_VAPID_KEY'] ?? 'YOUR_VAPID_KEY_HERE') : null;
-      print("[FCM] Fetching token with VAPID Key: $vapidKey");
-      final token = await _messaging.getToken(vapidKey: vapidKey);
-      print("[FCM] Token retrieved: $token");
-      if (token != null) {
-        await _saveTokenToDatabase(token);
+      final vapidKey = kIsWeb ? (dotenv.env['FCM_VAPID_KEY'] ?? 'BO0Po4qenG7jOO_N-TIl1Ers3m46ehFoPthGQJ__Wxz9hjfuNtLNu6lqDsM_Cndjw6AADbo_x-E4K3Nu9mr_dI8') : null;
+      print("[FCM] Fetching token silently with VAPID Key: $vapidKey");
+      try {
+        final token = await _messaging.getToken(vapidKey: vapidKey);
+        print("[FCM] Token retrieved silently on startup: $token");
+        if (token != null) {
+          await _saveTokenToDatabase(token);
+        }
+      } catch (e) {
+        print("[FCM] Silent token retrieval failed: $e");
       }
       _messaging.onTokenRefresh.listen(_saveTokenToDatabase);
 
@@ -170,6 +171,48 @@ class FCMService {
       }
     }
     // You can add more complex routing here if needed
+  }
+
+  /// Call this from a user gesture (button tap) to request notification permission.
+  /// Required on iOS Safari PWAs where auto-prompting is blocked.
+  Future<bool> requestPermissionAndRegister() async {
+    print("[FCM] requestPermissionAndRegister() called by user gesture...");
+    try {
+      NotificationSettings settings = await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      print("[FCM] Permission result: ${settings.authorizationStatus}");
+
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        final vapidKey = kIsWeb
+            ? (dotenv.env['FCM_VAPID_KEY'] ??
+                'BO0Po4qenG7jOO_N-TIl1Ers3m46ehFoPthGQJ__Wxz9hjfuNtLNu6lqDsM_Cndjw6AADbo_x-E4K3Nu9mr_dI8')
+            : null;
+        final token = await _messaging.getToken(vapidKey: vapidKey);
+        print("[FCM] Token after permission grant: $token");
+        if (token != null) {
+          await _saveTokenToDatabase(token);
+        }
+        _messaging.onTokenRefresh.listen(_saveTokenToDatabase);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      print("[FCM] requestPermissionAndRegister error: $e");
+      return false;
+    }
+  }
+
+  /// Check if notification permission is already granted (no prompt).
+  Future<bool> isPermissionGranted() async {
+    try {
+      final settings = await _messaging.getNotificationSettings();
+      return settings.authorizationStatus == AuthorizationStatus.authorized;
+    } catch (_) {
+      return false;
+    }
   }
 
   void showNotificationPopup(String title, String body, String? url) {

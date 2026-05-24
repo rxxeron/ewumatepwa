@@ -109,6 +109,20 @@
         });
       });
     });
+
+    // Register Firebase Messaging Service Worker for push notifications
+    // Uses a dedicated scope to avoid conflicts with Flutter's flutter_service_worker.js
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('firebase-messaging-sw.js', {
+          scope: '/firebase-cloud-messaging-push-scope',
+        }).then(function (registration) {
+          console.log('[FCM-SW] Firebase Messaging SW registered, scope:', registration.scope);
+        }).catch(function (err) {
+          console.error('[FCM-SW] Firebase Messaging SW registration failed:', err);
+        });
+      });
+    }
   </script>
 
   <!-- Redirect non-root paths to index.html for SPA routing (GitHub Pages fix) -->
