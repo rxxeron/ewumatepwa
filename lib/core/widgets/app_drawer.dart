@@ -15,14 +15,25 @@ class AppDrawer extends ConsumerWidget {
     final profileAsync = ref.watch(userProfileProvider);
 
     return Drawer(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      child: GlassContainer(
-        borderRadius: 0,
-        margin: EdgeInsets.zero,
-        padding: EdgeInsets.zero,
-        opacity: 0.1,
-        blur: 20,
+      backgroundColor: const Color(0xFF0F172A),
+      elevation: 16,
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            right: BorderSide(
+              color: Colors.white.withValues(alpha: 0.08),
+              width: 1,
+            ),
+          ),
+          gradient: const LinearGradient(
+            colors: [
+              Color(0xFF1E293B), // Premium dark slate card color
+              Color(0xFF0F172A), // Deep Slate background
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
         child: Column(
           children: [
             DrawerHeader(
