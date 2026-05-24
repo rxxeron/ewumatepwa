@@ -30,8 +30,9 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
     _firebaseInitialized = true;
+    print('[Firebase] Initialization successful!');
   } catch (e) {
-    if (kDebugMode) debugPrint('Firebase init error: $e');
+    print('[Firebase] Initialization failed error: $e');
   }
 
   try {
@@ -67,29 +68,32 @@ class MyApp extends ConsumerWidget {
     }
     
     // Initialize FCM when the user is logged in
+    print('[FCM] Checking initialization condition: _firebaseInitialized = $_firebaseInitialized');
     if (_firebaseInitialized) {
       // 1. If already logged in on startup, initialize FCM immediately
       final currentUser = ref.read(authRepositoryProvider).currentUser;
+      print('[FCM] currentUser on startup: ${currentUser?.id}');
       if (currentUser != null) {
         try {
           ref.read(fcmServiceProvider).initialize().catchError((err) {
-            if (kDebugMode) debugPrint('FCM Init Error: $err');
+            print('[FCM] Init Error on startup: $err');
           });
         } catch (e) {
-          if (kDebugMode) debugPrint('FCM provider creation failed: $e');
+          print('[FCM] provider creation failed on startup: $e');
         }
       }
 
       // 2. Listen to future auth changes
       ref.listen(authStateProvider, (previous, next) {
         final event = next.value?.event;
+        print('[FCM] authStateProvider event received: $event');
         if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession) {
           try {
             ref.read(fcmServiceProvider).initialize().catchError((err) {
-              if (kDebugMode) debugPrint('FCM Init Error: $err');
+              print('[FCM] Init Error on change: $err');
             });
           } catch (e) {
-            if (kDebugMode) debugPrint('FCM provider creation failed: $e');
+            print('[FCM] provider creation failed on change: $e');
           }
         }
       });
