@@ -68,6 +68,19 @@ class MyApp extends ConsumerWidget {
     
     // Initialize FCM when the user is logged in
     if (_firebaseInitialized) {
+      // 1. If already logged in on startup, initialize FCM immediately
+      final currentUser = ref.read(authRepositoryProvider).currentUser;
+      if (currentUser != null) {
+        try {
+          ref.read(fcmServiceProvider).initialize().catchError((err) {
+            if (kDebugMode) debugPrint('FCM Init Error: $err');
+          });
+        } catch (e) {
+          if (kDebugMode) debugPrint('FCM provider creation failed: $e');
+        }
+      }
+
+      // 2. Listen to future auth changes
       ref.listen(authStateProvider, (previous, next) {
         final event = next.value?.event;
         if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession) {
