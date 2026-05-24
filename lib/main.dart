@@ -11,10 +11,13 @@ import 'firebase_options.dart';
 import 'core/providers/session_guardian.dart';
 import 'core/repositories/auth_repository.dart';
 import 'core/services/update_service.dart';
+import 'core/config/url_strategy_config.dart'
+    if (dart.library.html) 'core/config/url_strategy_config_web.dart';
 
 /// Whether Firebase was successfully initialized (false on web).
 bool _firebaseInitialized = false;
 void main() async {
+  configureUrlStrategy();
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Cache Service (Hive) before running the app

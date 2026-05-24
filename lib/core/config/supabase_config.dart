@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -16,6 +17,9 @@ class SupabaseConfig {
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
+      authOptions: FlutterAuthClientOptions(
+        authFlowType: kIsWeb ? AuthFlowType.implicit : AuthFlowType.pkce,
+      ),
     );
   }
 }

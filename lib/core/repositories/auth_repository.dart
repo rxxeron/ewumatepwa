@@ -77,50 +77,21 @@ class AuthRepository {
     }
   }
 
-  // Google Sign In - Popup-based on web to preserve standalone PWA context, dynamic redirect/native deep link on mobile
+  // Google Sign In - Dynamic redirect based on the active origin for zero-wait authentication
   Future<bool> signInWithGoogle() async {
+    final String redirectTo;
     if (kIsWeb) {
-      try {
-        final webClientId = dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '561956344734-ulqeqls9u4h1hmpec41l9lufk336a9ga.apps.googleusercontent.com';
-        final GoogleSignIn googleSignIn = GoogleSignIn(
-          clientId: webClientId,
-        );
-
-        final googleUser = await googleSignIn.signIn();
-        if (googleUser == null) {
-          debugPrint('[AuthRepository] Google Sign-In aborted by user.');
-          return false;
-        }
-
-        final googleAuth = await googleUser.authentication;
-        final idToken = googleAuth.idToken;
-        final accessToken = googleAuth.accessToken;
-
-        if (idToken == null) {
-          throw const AuthException('Could not retrieve Google ID Token.');
-        }
-
-        final response = await _supabase.auth.signInWithIdToken(
-          provider: OAuthProvider.google,
-          idToken: idToken,
-          accessToken: accessToken,
-        );
-
-        if (response.user != null) {
-          await _cache.saveLastUserId(response.user!.id);
-        }
-        return true;
-      } catch (e, stack) {
-        debugPrint('[AuthRepository] Google Web Sign-In failed: $e\n$stack');
-        rethrow;
-      }
+      // Dynamically resolve active origin to prevent cross-site session mismatches
+      redirectTo = Uri.base.origin;
+      debugPrint('[AuthRepository] Web Google Sign-In redirecting back to: $redirectTo');
     } else {
-      // Mobile native deep-link callback
-      return await _supabase.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: 'io.supabase.ewumate://login-callback',
-      );
+      redirectTo = 'io.supabase.ewumate://login-callback';
     }
+
+    return await _supabase.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: redirectTo,
+    );
   }
 }
 
