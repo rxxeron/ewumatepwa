@@ -108,23 +108,31 @@ class FCMService {
             }
           } catch (_) {}
 
-          _localNotifications.show(
-            id: notification.hashCode,
-            title: notification.title,
-            body: notification.body,
-            notificationDetails: NotificationDetails(
-              android: AndroidNotificationDetails(
-                channel.id,
-                channel.name,
-                channelDescription: channel.description,
-                icon: '@mipmap/ic_launcher',
-                importance: channel.importance,
-                priority: Priority.high,
+          if (kIsWeb) {
+            showNotificationPopup(
+              notification.title ?? 'No Title',
+              notification.body ?? 'No Message',
+              routingUrl,
+            );
+          } else {
+            _localNotifications.show(
+              id: notification.hashCode,
+              title: notification.title,
+              body: notification.body,
+              notificationDetails: NotificationDetails(
+                android: AndroidNotificationDetails(
+                  channel.id,
+                  channel.name,
+                  channelDescription: channel.description,
+                  icon: '@mipmap/ic_launcher',
+                  importance: channel.importance,
+                  priority: Priority.high,
+                ),
+                iOS: const DarwinNotificationDetails(presentAlert: true, presentSound: true),
               ),
-              iOS: const DarwinNotificationDetails(presentAlert: true, presentSound: true),
-            ),
-            payload: jsonEncode({'title': notification.title, 'body': notification.body, 'url': routingUrl}),
-          );
+              payload: jsonEncode({'title': notification.title, 'body': notification.body, 'url': routingUrl}),
+            );
+          }
         }
       });
 

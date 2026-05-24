@@ -13,20 +13,27 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Intercept background notifications when PWA is not active
 messaging.onBackgroundMessage((payload) => {
   console.log("[firebase-messaging-sw.js] Background message intercepted: ", payload);
   
-  const notificationTitle = payload.notification.title || "EWUMate Notification";
+  // Robust parsing to support both standard notification and data-only payloads safely
+  const title = (payload.notification && payload.notification.title) || 
+                (payload.data && payload.data.title) || 
+                "EWUMate Notification";
+                
+  const body = (payload.notification && payload.notification.body) || 
+               (payload.data && payload.data.body) || 
+               "";
+  
   const notificationOptions = {
-    body: payload.notification.body || "",
+    body: body,
     icon: "/icons/Icon-192.png",
     data: {
       url: (payload.data && payload.data.url) ? payload.data.url : "/"
     }
   };
 
-  return self.registration.showNotification(notificationTitle, notificationOptions);
+  return self.registration.showNotification(title, notificationOptions);
 });
 
 // Navigate/focus standalone PWA window on click
