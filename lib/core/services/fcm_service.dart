@@ -25,6 +25,7 @@ class FCMService {
   FCMService(this._ref);
 
   Future<void> initialize() async {
+    debugPrint("[FCM] initialize() started...");
     // 0. Register Background Handler
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
@@ -72,10 +73,13 @@ class FCMService {
       badge: true,
       sound: true,
     );
+    debugPrint("[FCM] AuthorizationStatus: ${settings.authorizationStatus}");
 
     if (settings.authorizationStatus == AuthorizationStatus.authorized) {
       final vapidKey = kIsWeb ? (dotenv.env['FCM_VAPID_KEY'] ?? 'YOUR_VAPID_KEY_HERE') : null;
+      debugPrint("[FCM] Fetching token with VAPID Key: $vapidKey");
       final token = await _messaging.getToken(vapidKey: vapidKey);
+      debugPrint("[FCM] Token retrieved: $token");
       if (token != null) {
         await _saveTokenToDatabase(token);
       }
@@ -136,6 +140,7 @@ class FCMService {
 
   Future<void> _saveTokenToDatabase(String token) async {
     final user = _supabase.auth.currentUser;
+    debugPrint("[FCM] Saving token for user: ${user?.id}");
     if (user != null) {
       try {
         await _supabase.from('fcm_tokens').upsert({
@@ -143,6 +148,7 @@ class FCMService {
           'token': token,
           'updated_at': DateTime.now().toIso8601String(),
         });
+        debugPrint("[FCM] Token saved successfully in Supabase!");
       } catch (e) {
         debugPrint("[FCM] Token Registration Failed: $e");
       }
