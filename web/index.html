@@ -77,6 +77,14 @@
       return window.deferredPrompt !== null;
     };
 
+    window.isPWAStandalone = function() {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    };
+
+    window.isIOSDevice = function() {
+      return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    };
+
     window.triggerPWAInstall = async function() {
       const promptEvent = window.deferredPrompt;
       if (!promptEvent) return false;
