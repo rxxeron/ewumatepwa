@@ -16,14 +16,15 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log("[firebase-messaging-sw.js] Background message intercepted: ", payload);
   
-  // Robust parsing to support both standard notification and data-only payloads safely
-  const title = (payload.notification && payload.notification.title) || 
-                (payload.data && payload.data.title) || 
-                "EWUMate Notification";
-                
-  const body = (payload.notification && payload.notification.body) || 
-               (payload.data && payload.data.body) || 
-               "";
+  // If the browser already shows a default notification because the payload has a 'notification' object,
+  // we return early to avoid displaying a duplicate notification.
+  if (payload.notification) {
+    return;
+  }
+
+  // Robust parsing to support data-only payloads safely
+  const title = (payload.data && payload.data.title) || "EWUMate Notification";
+  const body = (payload.data && payload.data.body) || "";
   
   const notificationOptions = {
     body: body,

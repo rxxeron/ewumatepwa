@@ -18,7 +18,16 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  
+  <!-- Enforce HTTPS Redirect -->
+  <script>
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      location.replace('https://' + location.hostname + location.pathname + location.search);
+    }
+  </script>
+
+  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+  <meta name="description" content="Premium Mobile Assistant for East West University Students">
   
   <!-- GitHub Pages SPA routing fix -->
   <style>

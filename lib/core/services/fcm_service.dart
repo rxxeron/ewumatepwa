@@ -68,6 +68,66 @@ class FCMService {
       sound: true,
     );
 
+    // Register message listeners unconditionally so they are active as soon as permission is granted
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      RemoteNotification? notification = message.notification;
+      if (notification != null) {
+        final routingUrl = message.data['url'] as String?;
+        
+        // Save locally
+        try {
+          final userId = _supabase.auth.currentUser?.id;
+          if (userId != null) {
+            final newNotif = model.Notification(
+              id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+              userId: userId,
+              title: notification.title ?? 'No Title',
+              body: notification.body ?? 'No Message',
+              type: message.data['type'] ?? 'system',
+              isRead: false,
+              createdAt: message.sentTime ?? DateTime.now(),
+              payload: message.data.isNotEmpty ? message.data : null,
+            );
+            _ref.read(notificationRepositoryProvider).saveLocalNotification(newNotif);
+          }
+        } catch (_) {}
+
+        if (kIsWeb) {
+          showNotificationPopup(
+            notification.title ?? 'No Title',
+            notification.body ?? 'No Message',
+            routingUrl,
+          );
+        } else {
+          _localNotifications.show(
+            id: notification.hashCode,
+            title: notification.title,
+            body: notification.body,
+            notificationDetails: NotificationDetails(
+              android: AndroidNotificationDetails(
+                channel.id,
+                channel.name,
+                channelDescription: channel.description,
+                icon: '@mipmap/ic_launcher',
+                importance: channel.importance,
+                priority: Priority.high,
+              ),
+              iOS: const DarwinNotificationDetails(presentAlert: true, presentSound: true),
+            ),
+            payload: jsonEncode({'title': notification.title, 'body': notification.body, 'url': routingUrl}),
+          );
+        }
+      }
+    });
+
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _handleIncomingAction(
+        message.notification?.title, 
+        message.notification?.body, 
+        message.data['url'] as String?
+      );
+    });
+
     // Check permission status silently without prompting on startup (mandatory for iOS Safari)
     NotificationSettings settings = await _messaging.getNotificationSettings();
     print("[FCM] Current AuthorizationStatus on startup: ${settings.authorizationStatus}");
@@ -85,65 +145,6 @@ class FCMService {
         print("[FCM] Silent token retrieval failed: $e");
       }
       _messaging.onTokenRefresh.listen(_saveTokenToDatabase);
-
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        RemoteNotification? notification = message.notification;
-        if (notification != null) {
-          final routingUrl = message.data['url'] as String?;
-          
-          // Save locally
-          try {
-            final userId = _supabase.auth.currentUser?.id;
-            if (userId != null) {
-              final newNotif = model.Notification(
-                id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
-                userId: userId,
-                title: notification.title ?? 'No Title',
-                body: notification.body ?? 'No Message',
-                type: message.data['type'] ?? 'system',
-                isRead: false,
-                createdAt: message.sentTime ?? DateTime.now(),
-                payload: message.data.isNotEmpty ? message.data : null,
-              );
-              _ref.read(notificationRepositoryProvider).saveLocalNotification(newNotif);
-            }
-          } catch (_) {}
-
-          if (kIsWeb) {
-            showNotificationPopup(
-              notification.title ?? 'No Title',
-              notification.body ?? 'No Message',
-              routingUrl,
-            );
-          } else {
-            _localNotifications.show(
-              id: notification.hashCode,
-              title: notification.title,
-              body: notification.body,
-              notificationDetails: NotificationDetails(
-                android: AndroidNotificationDetails(
-                  channel.id,
-                  channel.name,
-                  channelDescription: channel.description,
-                  icon: '@mipmap/ic_launcher',
-                  importance: channel.importance,
-                  priority: Priority.high,
-                ),
-                iOS: const DarwinNotificationDetails(presentAlert: true, presentSound: true),
-              ),
-              payload: jsonEncode({'title': notification.title, 'body': notification.body, 'url': routingUrl}),
-            );
-          }
-        }
-      });
-
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-        _handleIncomingAction(
-          message.notification?.title, 
-          message.notification?.body, 
-          message.data['url'] as String?
-        );
-      });
     }
   }
 
