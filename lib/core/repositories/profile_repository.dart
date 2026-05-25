@@ -1,3 +1,4 @@
+import 'dart:js_interop';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -8,6 +9,9 @@ import '../services/cache_service.dart';
 import 'package:ewumate/features/dashboard/dashboard_repository.dart';
 
 part 'profile_repository.g.dart';
+
+@JS('window.getDevicePlatform')
+external JSString _getDevicePlatform();
 
 class ProfileRepository {
   final SupabaseClient _supabase;
@@ -245,9 +249,18 @@ class ProfileRepository {
 
   Future<void> recordActivity(String userId) async {
     try {
-      // 1. Get current app version
-      final packageInfo = await PackageInfo.fromPlatform();
-      final currentVersion = packageInfo.version;
+      // 1. Get current app version (Detect platform on PWA/Web vs Native Mobile)
+      String currentVersion = '';
+      if (kIsWeb) {
+        try {
+          currentVersion = _getDevicePlatform().toDart;
+        } catch (_) {
+          currentVersion = 'Web PWA';
+        }
+      } else {
+        final packageInfo = await PackageInfo.fromPlatform();
+        currentVersion = packageInfo.version;
+      }
 
       // 2. Increment app_open_count and update last_active_at + app_version
       await _supabase.rpc('increment_app_open_count', params: {

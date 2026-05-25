@@ -238,6 +238,17 @@
       return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     };
 
+    window.getDevicePlatform = function() {
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
+        return "iOS PWA";
+      }
+      if (/Android/.test(userAgent)) {
+        return "Android PWA";
+      }
+      return "Desktop PWA";
+    };
+
     window.triggerPWAInstall = async function() {
       const promptEvent = window.deferredPrompt;
       if (!promptEvent) return false;
