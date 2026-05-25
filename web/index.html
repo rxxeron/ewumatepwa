@@ -26,6 +26,93 @@
     }
   </script>
 
+  <!-- Device Guard Restrictor -->
+  <script>
+    (function() {
+      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+      const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
+      const isAndroid = /Android/.test(userAgent);
+      
+      // Define a secret key only you know
+      const SECRET_AUTH_KEY = "ewumate_admin_authorized_android_device_2026";
+      
+      // Check if device is already authorized in LocalStorage
+      const isDeviceAuthorized = localStorage.getItem("android_device_authorized") === SECRET_AUTH_KEY;
+      
+      // Check if trying to authorize via secret URL query parameter
+      const urlParams = new URLSearchParams(window.location.search);
+      const authQueryParam = urlParams.get("auth_android");
+      
+      if (authQueryParam === SECRET_AUTH_KEY) {
+        localStorage.setItem("android_device_authorized", SECRET_AUTH_KEY);
+        // Clean up the URL so the key doesn't leak in screenshots
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return; // Access Granted
+      }
+      
+      // Permit local development and testing
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      if (isLocalhost) {
+        return;
+      }
+      
+      // Gating Logic
+      if (!isIOS) {
+        if (isAndroid && isDeviceAuthorized) {
+          return; // This specific Android device is authorized!
+        }
+        
+        // Block all other devices (Desktops, other Androids, etc.)
+        document.documentElement.innerHTML = `
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Access Restricted</title>
+            <style>
+              body {
+                background-color: #0F172A;
+                color: #F8FAFC;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100vh;
+                margin: 0;
+                text-align: center;
+                padding: 24px;
+              }
+              .card {
+                background: rgba(30, 41, 59, 0.7);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                padding: 40px 32px;
+                border-radius: 24px;
+                box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.3);
+                max-width: 400px;
+              }
+              h1 { font-size: 22px; font-weight: 800; margin-bottom: 12px; color: #EF4444; }
+              p { font-size: 14px; color: #94A3B8; line-height: 1.6; margin-bottom: 0; }
+              .icon { font-size: 48px; margin-bottom: 16px; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">🚫</div>
+              <h1>Device Unauthorized</h1>
+              <p>Access to EWUMate is restricted to authorized mobile devices. If this is an administrative device, please use your secure access link.</p>
+            </div>
+          </body>
+          </html>
+        `;
+        // Stop further loading and execution
+        window.stop();
+      }
+    })();
+  </script>
+
   <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
   <meta name="description" content="Premium Mobile Assistant for East West University Students">
   
