@@ -18,160 +18,7 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  
-  <!-- Enforce HTTPS Redirect -->
-  <script>
-    if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-      location.replace('https://' + location.hostname + location.pathname + location.search);
-    }
-  </script>
-
-  <!-- Device Guard Restrictor -->
-  <script>
-    (function() {
-      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-      const isIOS = /iPad|iPhone|iPod/.test(userAgent) && !window.MSStream;
-      const isAndroid = /Android/.test(userAgent);
-      
-      // Define a secret key only you know
-      const SECRET_AUTH_KEY = "ewumate_admin_authorized_android_device_2026";
-      
-      // Check if device is already authorized in LocalStorage
-      const isDeviceAuthorized = localStorage.getItem("android_device_authorized") === SECRET_AUTH_KEY;
-      
-      // Check if trying to authorize via secret URL query parameter
-      const urlParams = new URLSearchParams(window.location.search);
-      const authQueryParam = urlParams.get("auth_android");
-      
-      if (authQueryParam === SECRET_AUTH_KEY) {
-        localStorage.setItem("android_device_authorized", SECRET_AUTH_KEY);
-        // Clean up the URL so the key doesn't leak in screenshots
-        window.history.replaceState({}, document.title, window.location.pathname);
-        return; // Access Granted
-      }
-      
-      // Permit local development and testing
-      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-      if (isLocalhost) {
-        return;
-      }
-      
-      // Gating Logic
-      if (!isIOS) {
-        if (isAndroid && isDeviceAuthorized) {
-          return; // This specific Android device is authorized!
-        }
-        
-        // Block all other devices (Desktops, other Androids, etc.)
-        document.documentElement.innerHTML = `
-          <!DOCTYPE html>
-          <html lang="en">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Access Restricted</title>
-            <style>
-              body {
-                background-color: #0F172A;
-                color: #F8FAFC;
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                height: 100vh;
-                margin: 0;
-                text-align: center;
-                padding: 24px;
-              }
-              .card {
-                background: rgba(30, 41, 59, 0.7);
-                backdrop-filter: blur(16px);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                padding: 44px 32px;
-                border-radius: 28px;
-                box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-                max-width: 420px;
-                width: 100%;
-                box-sizing: border-box;
-              }
-              h1 { font-size: 24px; font-weight: 900; margin-bottom: 16px; color: #F59E0B; letter-spacing: -0.5px; }
-              p { font-size: 14.5px; color: #94A3B8; line-height: 1.65; margin-bottom: 28px; }
-              .icon { font-size: 54px; margin-bottom: 20px; }
-              .btn {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                background: #D4AF37; /* Premium Gold */
-                color: #0F172A;
-                text-decoration: none;
-                font-weight: 800;
-                font-size: 14px;
-                padding: 14px 28px;
-                border-radius: 16px;
-                box-shadow: 0 10px 15px -3px rgba(212, 175, 55, 0.3);
-                transition: transform 0.2s, box-shadow 0.2s;
-                margin-bottom: 28px;
-                width: 100%;
-                box-sizing: border-box;
-              }
-              .btn:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 12px 20px -3px rgba(212, 175, 55, 0.5);
-              }
-              .support {
-                border-top: 1px solid rgba(255, 255, 255, 0.08);
-                padding-top: 24px;
-                margin-top: 12px;
-              }
-              .support-title {
-                font-size: 12px;
-                color: #64748B;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-                margin-bottom: 8px;
-              }
-              .email {
-                color: #38BDF8; /* Cyan blue link */
-                text-decoration: none;
-                font-weight: 600;
-                font-size: 14px;
-                transition: opacity 0.2s;
-              }
-              .email:hover {
-                opacity: 0.8;
-                text-decoration: underline;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <svg viewBox="0 0 170 170" width="54" height="54" fill="#F8FAFC" style="margin-bottom: 24px; display: inline-block;">
-                <path d="M150.37 130.25c-2.45 5.66-5.35 10.87-8.71 15.66-4.58 6.53-8.33 11.05-11.22 13.56-4.48 4.12-9.28 6.23-14.42 6.35-3.69 0-8.14-1.05-13.32-3.18-5.19-2.12-9.97-3.17-14.34-3.17-4.58 0-9.49 1.05-14.75 3.17-5.26 2.13-9.5 3.24-12.74 3.35-4.34.13-9.13-1.9-14.35-6.07-2.73-2.22-6.55-6.75-11.45-13.56-5.46-7.62-10.01-16.46-13.63-26.54-3.62-10.08-5.46-19.86-5.46-29.35 0-14.28 3.73-26.1 11.2-35.48 7.46-9.37 16.63-14.12 27.5-14.24 5.92-.12 12.08 2.02 18.49 6.4 4.02 2.76 7.41 4.13 10.16 4.13 2.12 0 5.42-1.28 9.9-3.84 6.7-3.84 12.87-5.63 18.5-5.38 14.16.63 25 6.07 32.5 16.32-11.75 7.12-17.5 16.85-17.25 29.21.25 9.77 3.84 17.9 10.75 24.38 6.91 6.47 15.22 10.03 24.93 10.7-2.24 6.64-5.3 13.48-9.16 20.52zm-33.84-118.84c0-7.77 2.77-15.11 8.31-21.03 5.54-5.91 12.16-9.17 19.86-9.77.13 1.01.2 1.77.2 2.27 0 7.63-2.92 14.93-8.77 20.9-5.85 5.97-12.7 9.17-20.54 8.6-.26-1.02-.63-4.22-.63-9.37z"/>
-              </svg>
-              <h1>iOS Device Required</h1>
-              <p>This web portal is strictly restricted to <strong>iOS (iPhone/iPad)</strong> users. Android and desktop devices are not allowed to access this web application.</p>
-              
-              <a href="https://play.google.com/store/apps/details?id=com.rxxeron.ewumate" class="btn" target="_blank">
-                Download on Play Store
-              </a>
-              
-              <div class="support">
-                <div class="support-title">Need Help?</div>
-                <a href="mailto:rhrakibulhasan279@gmail.com" class="email">rhrakibulhasan279@gmail.com</a>
-              </div>
-            </div>
-          </body>
-          </html>
-        `;
-        // Stop further loading and execution
-        window.stop();
-      }
-    })();
-  </script>
-
-  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
-  <meta name="description" content="Premium Mobile Assistant for East West University Students">
+  <meta name="description" content="A new Flutter project.">
   
   <!-- GitHub Pages SPA routing fix -->
   <style>
@@ -238,17 +85,6 @@
       return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     };
 
-    window.getDevicePlatform = function() {
-      const userAgent = navigator.userAgent || navigator.vendor || window.opera;
-      if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-        return "iOS PWA";
-      }
-      if (/Android/.test(userAgent)) {
-        return "Android PWA";
-      }
-      return "Desktop PWA";
-    };
-
     window.triggerPWAInstall = async function() {
       const promptEvent = window.deferredPrompt;
       if (!promptEvent) return false;
@@ -273,20 +109,6 @@
         });
       });
     });
-
-    // Register Firebase Messaging Service Worker for push notifications
-    // Uses a dedicated scope to avoid conflicts with Flutter's flutter_service_worker.js
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function () {
-        navigator.serviceWorker.register('firebase-messaging-sw.js', {
-          scope: '/firebase-cloud-messaging-push-scope',
-        }).then(function (registration) {
-          console.log('[FCM-SW] Firebase Messaging SW registered, scope:', registration.scope);
-        }).catch(function (err) {
-          console.error('[FCM-SW] Firebase Messaging SW registration failed:', err);
-        });
-      });
-    }
   </script>
 
   <!-- Redirect non-root paths to index.html for SPA routing (GitHub Pages fix) -->
