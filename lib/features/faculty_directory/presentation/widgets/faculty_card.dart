@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:go_router/go_router.dart';
 import '../../../../core/models/faculty.dart';
 
 class FacultyCard extends StatelessWidget {
@@ -40,7 +41,7 @@ class FacultyCard extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: InkWell(
-            onTap: faculty.profileUrl != null ? () => _launchUrl(faculty.profileUrl!) : null,
+            onTap: () => context.push('/services/faculty-directory/details', extra: faculty),
             child: Padding(
               padding: const EdgeInsets.all(16.0),
               child: Row(
