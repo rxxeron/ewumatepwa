@@ -166,12 +166,21 @@ class FCMService {
   }
 
   void _handleIncomingAction(String? title, String? body, String? url) {
-    if (url != null && url.isNotEmpty) {
-      if (url.startsWith('http')) {
-        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      }
+    showNotificationPopup(
+      title ?? 'Notification Received',
+      body ?? '',
+      url,
+    );
+  }
+
+  void _navigateToUrl(String? url) {
+    if (url == null || url.isEmpty) return;
+    if (url.startsWith('/')) {
+      final context = rootNavigatorKey.currentContext;
+      if (context != null) context.go(url);
+    } else if (url.startsWith('http')) {
+      launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     }
-    // You can add more complex routing here if needed
   }
 
   /// Call this from a user gesture (button tap) to request notification permission.
@@ -268,7 +277,7 @@ class FCMService {
                           child: FilledButton(
                             onPressed: () {
                               Navigator.pop(context);
-                              _handleIncomingAction(title, body, url);
+                              _navigateToUrl(url);
                             },
                             style: FilledButton.styleFrom(backgroundColor: Colors.cyanAccent),
                             child: const Text('View Action', style: TextStyle(color: Colors.black)),
