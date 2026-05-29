@@ -33,6 +33,7 @@ import '../../core/utils/date_utils.dart' as date_util;
 
 import '../../core/utils/time_utils.dart';
 import '../../core/services/cache_service.dart';
+import '../../core/services/fcm_service.dart';
 import 'hero_card.dart';
 import 'schedule_card.dart';
 import 'pwa_install_banner.dart';
@@ -89,6 +90,29 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     final refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       if (mounted) _refreshDashboard(isSilent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  void _checkAndShowPendingNotifications() {
+    if (_loadingInit) return;
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final fcmService = ref.read(fcmServiceProvider);
+        fcmService.isDashboardStable = true;
+        
+        final pending = fcmService.pendingAction;
+        if (pending != null) {
+          debugPrint("[FCM] Executing pending PWA notification click inside stable Dashboard Screen");
+          fcmService.showNotificationPopup(pending.title, pending.body, pending.url);
+          fcmService.clearPendingAction();
+        }
+      }
     });
   }
 
@@ -227,6 +251,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         });
         
         _updateHomeWidget(dashboardData);
+        _checkAndShowPendingNotifications();
       }
       
       // 4. Check for app updates and show a soft Play Store redirection banner
@@ -262,11 +287,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           );
         }
       }
-      if (mounted) setState(() => _loadingInit = false);
+      if (mounted) {
+        setState(() => _loadingInit = false);
+        _checkAndShowPendingNotifications();
+      }
     } catch (e, stack) {
       debugPrint('[Dashboard] Refresh Error: $e\n$stack');
       if (mounted) {
         setState(() => _loadingInit = false);
+        _checkAndShowPendingNotifications();
         // Only show snackbar if we do not have any cached data active
         if (_lastValidScheduleData == null) {
           ScaffoldMessenger.of(context).showSnackBar(

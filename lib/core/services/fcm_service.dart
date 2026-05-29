@@ -15,6 +15,18 @@ import '../widgets/glass_kit.dart';
 import '../repositories/notification_repository.dart';
 import '../models/notification.dart' as model;
 
+class PendingNotificationAction {
+  final String title;
+  final String body;
+  final String? url;
+
+  PendingNotificationAction({
+    required this.title,
+    required this.body,
+    this.url,
+  });
+}
+
 final fcmServiceProvider = Provider<FCMService>((ref) => FCMService(ref));
 
 class FCMService {
@@ -23,12 +35,32 @@ class FCMService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
+  bool isDashboardStable = false;
+  PendingNotificationAction? _pendingAction;
+  PendingNotificationAction? get pendingAction => _pendingAction;
+
+  void clearPendingAction() {
+    _pendingAction = null;
+  }
+
   FCMService(this._ref);
 
   Future<void> initialize() async {
     print("[FCM] initialize() started...");
     // 0. Register Background Handler
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+    // Handle terminated-state notification tap (app was fully closed)
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      Future.delayed(const Duration(milliseconds: 2500), () {
+        _handleIncomingAction(
+          initialMessage.notification?.title,
+          initialMessage.notification?.body,
+          initialMessage.data['url'] as String?,
+        );
+      });
+    }
 
     // 1. Setup Local Notifications for Foreground and Channel Creation
     const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -122,11 +154,14 @@ class FCMService {
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      _handleIncomingAction(
-        message.notification?.title, 
-        message.notification?.body, 
-        message.data['url'] as String?
-      );
+      // Add 800ms delay to let the app resume and route state settle perfectly
+      Future.delayed(const Duration(milliseconds: 800), () {
+        _handleIncomingAction(
+          message.notification?.title, 
+          message.notification?.body, 
+          message.data['url'] as String?
+        );
+      });
     });
 
     // Check permission status silently without prompting on startup (mandatory for iOS Safari)
@@ -167,11 +202,20 @@ class FCMService {
   }
 
   void _handleIncomingAction(String? title, String? body, String? url) {
-    showNotificationPopup(
-      title ?? 'Notification Received',
-      body ?? '',
-      url,
-    );
+    if (!isDashboardStable) {
+      print("[FCM] PWA Dashboard not stable yet. Saving pending notification action.");
+      _pendingAction = PendingNotificationAction(
+        title: title ?? 'Notification Received',
+        body: body ?? '',
+        url: url,
+      );
+    } else {
+      showNotificationPopup(
+        title ?? 'Notification Received',
+        body ?? '',
+        url,
+      );
+    }
   }
 
   void _navigateToUrl(String? url) {
