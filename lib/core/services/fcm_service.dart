@@ -62,6 +62,20 @@ class FCMService {
       });
     }
 
+    // Handle Web PWA URL query parameter notification tap
+    if (kIsWeb) {
+      final params = Uri.base.queryParameters;
+      final notifTitle = params['notif_title'];
+      if (notifTitle != null && notifTitle.isNotEmpty) {
+        final notifBody = params['notif_body'] ?? '';
+        final notifUrl = params['notif_url'];
+        // Delay slightly to let splash screen load, then handle action
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          _handleIncomingAction(notifTitle, notifBody, notifUrl);
+        });
+      }
+    }
+
     // 1. Setup Local Notifications for Foreground and Channel Creation
     const AndroidInitializationSettings initializationSettingsAndroid = AndroidInitializationSettings('@mipmap/ic_launcher');
     const DarwinInitializationSettings initializationSettingsDarwin = DarwinInitializationSettings();
