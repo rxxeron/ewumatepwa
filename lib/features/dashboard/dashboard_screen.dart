@@ -254,27 +254,29 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         _checkAndShowPendingNotifications();
       }
       
-      // 4. Check for app updates and show a soft Play Store redirection banner
-      try {
-        final currentVersion = versionInfo.version;
-        if (updateRes != null) {
-          final latestVersion = updateRes['latest_version']?.toString() ?? "";
-          if (VersionUtils.isUpdateAvailable(currentVersion, latestVersion)) {
-            if (mounted) {
-              setState(() {
-                _showUpdateBanner = true;
-              });
-            }
-          } else {
-            if (mounted) {
-              setState(() {
-                _showUpdateBanner = false;
-              });
+      // 4. Check for app updates and show a soft Play Store redirection banner (Only on Mobile)
+      if (!kIsWeb) {
+        try {
+          final currentVersion = versionInfo.version;
+          if (updateRes != null) {
+            final latestVersion = updateRes['latest_version']?.toString() ?? "";
+            if (VersionUtils.isUpdateAvailable(currentVersion, latestVersion)) {
+              if (mounted) {
+                setState(() {
+                  _showUpdateBanner = true;
+                });
+              }
+            } else {
+              if (mounted) {
+                setState(() {
+                  _showUpdateBanner = false;
+                });
+              }
             }
           }
+        } catch (e) {
+          debugPrint('[Dashboard] Update Banner Check Error: $e');
         }
-      } catch (e) {
-        debugPrint('[Dashboard] Update Banner Check Error: $e');
       }
 
       // 5. Check Advising Banner for NEXT semester

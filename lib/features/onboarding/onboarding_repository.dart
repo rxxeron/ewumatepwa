@@ -241,16 +241,22 @@ class OnboardingRepository {
     required String fullName,
     required String nickname,
     required String studentId,
+    String? photoUrl,
   }) async {
     final user = _client.auth.currentUser;
     if (user == null) throw Exception("User not authenticated");
 
-    await _client.from('profiles').upsert({
+    final Map<String, dynamic> data = {
       'id': user.id,
       'full_name': fullName,
       'nickname': nickname,
       'student_id': studentId,
-    });
+    };
+    if (photoUrl != null) {
+      data['photo_url'] = photoUrl;
+    }
+
+    await _client.from('profiles').upsert(data);
 
     _ref.invalidate(profileProvider);
   }

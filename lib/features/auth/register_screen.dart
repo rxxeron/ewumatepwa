@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
-import '../../core/services/storage_service.dart';
 import '../../core/widgets/glass_kit.dart';
 
 import '../../core/repositories/auth_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/utils/formatters.dart';
-import 'package:flutter/services.dart';
 import '../../core/utils/error_utils.dart';
 import 'auth_providers.dart';
 
@@ -29,26 +27,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   final _nicknameController = TextEditingController();
   final _studentIdController = TextEditingController();
 
-  final StorageService _storageService = StorageService();
-
   bool _loading = false;
   bool _passwordVisible = false;
-  XFile? _imageFile; // Used for upload
-  Uint8List? _imageBytes; // Used for preview (web-safe)
-
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    // Use lower quality for performance optimization
-    final picked =
-        await picker.pickImage(source: ImageSource.gallery, imageQuality: 60);
-    if (picked != null) {
-      final bytes = await picked.readAsBytes();
-      setState(() {
-        _imageFile = picked;
-        _imageBytes = bytes;
-      });
-    }
-  }
 
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) {
@@ -57,12 +37,21 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     setState(() => _loading = true);
     try {
+      // Option B dynamic redirect: Web uses Uri.base.origin, mobile uses custom scheme
+      final redirectUrl = kIsWeb 
+          ? '${Uri.base.origin}/login-callback' 
+          : 'ewumate://login-callback';
+
       final res = await Supabase.instance.client.auth.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text,
+        emailRedirectTo: redirectUrl,
         data: {
           'displayName': _nicknameController.text.trim(),
           'fullName': _fullNameController.text.trim(),
+          'full_name': _fullNameController.text.trim(),
+          'nickname': _nicknameController.text.trim(),
+          'studentId': _studentIdController.text.trim(),
         },
       );
 
@@ -70,24 +59,51 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         throw const AuthException("Registration failed");
       }
 
-      final String uid = res.user!.id;
-      String? photoURL;
+      if (res.session == null) {
+        // Email verification is required and pending
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              backgroundColor: Colors.grey.shade900,
+              title: const Text(
+                "Verify Your Email",
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              content: const Text(
+                "A verification link has been sent to your student email. Please check your inbox and verify your email before logging in.",
+                style: TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    context.go('/login');
+                  },
+                  child: const Text(
+                    "OK",
+                    style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+      } else {
+        // Verification was bypassed (e.g. email verified by provider like Google)
+        final String uid = res.user!.id;
+        await Supabase.instance.client.from('profiles').upsert({
+          'id': uid,
+          'full_name': _fullNameController.text.trim(),
+          'nickname': _nicknameController.text.trim(),
+          'student_id': _studentIdController.text.trim(),
+          'onboarding_status': 'registered',
+        });
 
-      if (_imageFile != null) {
-        photoURL = await _storageService.uploadProfileImage(_imageFile!, uid);
-      }
-
-      await Supabase.instance.client.from('profiles').upsert({
-        'id': uid,
-        'full_name': _fullNameController.text.trim(),
-        'nickname': _nicknameController.text.trim(),
-        'student_id': _studentIdController.text.trim(),
-        'photo_url': photoURL,
-        'onboarding_status': 'registered',
-      });
-
-      if (mounted) {
-        context.go('/onboarding/program'); // Direct to flow
+        if (mounted) {
+          context.go('/onboarding/program');
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -107,7 +123,10 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     setState(() => _loading = true);
     try {
       await ref.read(authRepositoryProvider).signInWithGoogle();
-      // Note: On web, this redirects to Google and back. No need to navigate manually.
+      ref.invalidate(profileProvider);
+      if (mounted) {
+        context.go('/');
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -149,39 +168,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                   const Text("Join EWUmate today!",
                       style: TextStyle(fontSize: 14, color: Colors.white70)),
                   const SizedBox(height: 24),
-
-                  // Picture
-                  Stack(
-                    children: [
-                      CircleAvatar(
-                        radius: 45,
-                        backgroundColor: Colors.white10,
-                        backgroundImage: _imageBytes != null
-                            ? MemoryImage(_imageBytes!)
-                            : null,
-                        child: _imageFile == null
-                            ? const Icon(Icons.person,
-                                size: 45, color: Colors.white70)
-                            : null,
-                      ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: CircleAvatar(
-                          backgroundColor: Colors.cyanAccent,
-                          radius: 16,
-                          child: IconButton(
-                            constraints: const BoxConstraints(),
-                            padding: EdgeInsets.zero,
-                            icon: const Icon(Icons.camera_alt,
-                                size: 16, color: Colors.black),
-                            onPressed: _pickImage,
-                          ),
-                        ),
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 20),
 
                   // Fields
                   Row(
@@ -415,8 +401,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       onPressed: _loading ? null : _googleLogin,
-                      icon: Image.asset(
-                        'assets/googleg_48dp.png',
+                      icon: Image.network(
+                        'https://www.gstatic.com/images/branding/product/2x/googleg_48dp.png',
                         height: 20,
                         errorBuilder: (context, error, stackTrace) {
                           return Container(
