@@ -11,6 +11,7 @@ import 'firebase_options.dart';
 import 'core/providers/session_guardian.dart';
 import 'core/repositories/auth_repository.dart';
 import 'core/services/update_service.dart';
+import 'core/widgets/access_restricted_screen.dart';
 import 'core/config/url_strategy_config.dart'
     if (dart.library.html) 'core/config/url_strategy_config_web.dart';
 
@@ -100,6 +101,21 @@ class MyApp extends ConsumerWidget {
     }
     
     final router = ref.watch(appRouterProvider);
+
+    // Block non-Apple devices on PWA web
+    if (kIsWeb) {
+      final isApple = defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS;
+      if (!isApple) {
+        return MaterialApp(
+          title: 'Access Restricted',
+          theme: ThemeData.dark().copyWith(
+            scaffoldBackgroundColor: const Color(0xFF0F172A),
+          ),
+          debugShowCheckedModeBanner: false,
+          home: const AccessRestrictedScreen(),
+        );
+      }
+    }
 
     return MaterialApp.router(
       title: 'EWUmate',

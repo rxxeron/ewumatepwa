@@ -142,9 +142,20 @@ class AppDrawer extends ConsumerWidget {
                         () => context.push('/tutorials'),
                         color: Colors.cyanAccent),
                   _buildDrawerItem(
-                        context, Icons.feedback_outlined, "Feedback & Support",
-                        () => context.push('/feedback'),
-                        color: Colors.lightGreenAccent),                  const Divider(color: Colors.white24),
+                    context,
+                    Icons.favorite_rounded,
+                    "Support the Developer",
+                    () => context.push('/support-developer'),
+                    color: Colors.pinkAccent,
+                  ),
+                  _buildDrawerItem(
+                    context,
+                    Icons.feedback_outlined,
+                    "Submit Feedback",
+                    () => context.push('/feedback'),
+                    color: Colors.lightGreenAccent,
+                  ),
+                  const Divider(color: Colors.white24),
                   _buildDrawerItem(
                     context,
                     Icons.logout,
