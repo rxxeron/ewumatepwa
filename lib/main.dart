@@ -102,8 +102,8 @@ class MyApp extends ConsumerWidget {
     
     final router = ref.watch(appRouterProvider);
 
-    // Block non-Apple devices on PWA web
-    if (kIsWeb) {
+    // Block non-Apple devices on PWA web (bypass in local debug mode)
+    if (kIsWeb && !kDebugMode) {
       final isApple = defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS;
       if (!isApple) {
         return MaterialApp(

@@ -1176,7 +1176,7 @@ class _CourseProgressDetailScreenState
       }
       
       // 4. Fetch cancellations and makeups from schedule exceptions
-      final Set<String> cancelledDates = {};
+      final Set<String> cancelledSessions = {};
       final List<Map<String, dynamic>> courseMakeups = [];
       try {
         final exceptionsRes = await Supabase.instance.client
@@ -1190,7 +1190,14 @@ class _CourseProgressDetailScreenState
             final type = ex['type']?.toString();
             if (dateStr != null && dateStr.isNotEmpty) {
               if (type == 'cancel') {
-                cancelledDates.add(dateStr);
+                final metadata = ex['metadata'] as Map<String, dynamic>? ?? {};
+                final sessionType = metadata['sessionType']?.toString();
+                if (sessionType != null && sessionType.isNotEmpty) {
+                  cancelledSessions.add('${dateStr}_$sessionType');
+                } else {
+                  cancelledSessions.add('${dateStr}_Theory');
+                  cancelledSessions.add('${dateStr}_Lab');
+                }
               } else if (type == 'makeup' || type == 'manual') {
                 courseMakeups.add(ex);
               }
@@ -1275,7 +1282,7 @@ class _CourseProgressDetailScreenState
           if (_markedDates[key] != 'holiday' && _markedDates[dateStr] != 'holiday') {
             _markedDates[key] = 'holiday';
           }
-        } else if (cancelledDates.contains(dateStr)) {
+        } else if (cancelledSessions.contains(key)) {
           if (_markedDates[key] != 'cancelled' && _markedDates[dateStr] != 'cancelled') {
             _markedDates[key] = 'cancelled';
           }
