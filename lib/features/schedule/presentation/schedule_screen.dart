@@ -103,10 +103,12 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
           }).toList(),
         };
 
-        await HomeWidget.saveWidgetData('schedule_json', jsonEncode(encodableData));
-        await HomeWidget.updateWidget(
-          androidName: 'ScheduleWidgetProvider',
-        );
+        if (!kIsWeb) {
+          await HomeWidget.saveWidgetData('schedule_json', jsonEncode(encodableData));
+          await HomeWidget.updateWidget(
+            androidName: 'ScheduleWidgetProvider',
+          );
+        }
 
         if (kDebugMode) {
           debugPrint('[ScheduleScreen] Successfully updated Cache & Home Screen Widget with fresh schedule.');

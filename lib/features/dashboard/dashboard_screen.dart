@@ -358,6 +358,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Future<void> _updateHomeWidget(Map<String, dynamic> rawData) async {
+    if (kIsWeb) return;
     try {
       final processedData = DashboardLogic.processDashboardData(rawData);
       
