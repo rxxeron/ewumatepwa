@@ -5,6 +5,12 @@ import '../../features/auth/auth_providers.dart';
 
 part 'feature_flag_provider.g.dart';
 
+/// Controls whether ads/banners are enabled for a given screen.
+/// Currently disabled throughout the app.
+final isAdEnabledForProvider = Provider.family<bool, String>((ref, screenName) {
+  return false;
+});
+
 @riverpod
 Future<bool> isAdvisingOpen(IsAdvisingOpenRef ref) async {
   final profile = await ref.watch(profileProvider.future);

@@ -69,6 +69,16 @@ class ServicesScreen extends ConsumerWidget {
                       context.push('/services/study-vault');
                     },
                   ),
+                  _buildServiceCard(
+                    context,
+                    title: 'Faculty Assignment',
+                    icon: Icons.assignment_ind_outlined,
+                    color: Colors.teal.shade100,
+                    iconColor: Colors.teal.shade700,
+                    onTap: () {
+                      context.push('/services/faculty-assignment');
+                    },
+                  ),
               ],
             ),
           ],

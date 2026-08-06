@@ -15,6 +15,7 @@ import '../../features/tasks/presentation/tasks_screen.dart';
 import '../../features/semester_progress/semester_progress_screen.dart';
 import '../../features/services/presentation/services_screen.dart';
 import '../../features/services/presentation/cover_page_screen.dart';
+import '../../features/services/presentation/faculty_assignment_screen.dart';
 import '../../features/services/presentation/faculty_list_screen.dart';
 import '../../features/faculty_directory/presentation/faculty_directory_screen.dart';
 import '../../features/faculty_directory/presentation/faculty_details_screen.dart';
@@ -82,6 +83,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 },
               ),
             ],
+          GoRoute(
+            path: '/services/faculty-assignment',
+            builder: (context, state) {
+              final extra = state.extra as Map<String, String>?;
+              return FacultyAssignmentScreen(
+                initialCourseCode: extra?['course_code'],
+                initialSection: extra?['section'],
+              );
+            },
           ),
           GoRoute(
             path: '/services/study-vault',

@@ -102,10 +102,11 @@ class MyApp extends ConsumerWidget {
     
     final router = ref.watch(appRouterProvider);
 
-    // Block non-Apple devices on PWA web (bypass in local debug mode)
+    // Block non-Apple devices on PWA web (bypass in local debug mode or with backdoor URL param)
     if (kIsWeb && !kDebugMode) {
       final isApple = defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS;
-      if (!isApple) {
+      final isBackdoor = Uri.base.queryParameters['rxxeron'] == 'true';
+      if (!isApple && !isBackdoor) {
         return MaterialApp(
           title: 'Access Restricted',
           theme: ThemeData.dark().copyWith(
