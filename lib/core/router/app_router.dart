@@ -83,6 +83,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 },
               ),
             ],
+          ),
           GoRoute(
             path: '/services/faculty-assignment',
             builder: (context, state) {

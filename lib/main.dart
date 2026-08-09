@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:hive/hive.dart';
 import 'core/config/supabase_config.dart';
 import 'core/router/app_router.dart';
 import 'core/services/cache_service.dart';
@@ -105,7 +106,25 @@ class MyApp extends ConsumerWidget {
     // Block non-Apple devices on PWA web (bypass in local debug mode or with backdoor URL param)
     if (kIsWeb && !kDebugMode) {
       final isApple = defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS;
-      final isBackdoor = Uri.base.queryParameters['rxxeron'] == 'true';
+      
+      final queryParamBackdoor = Uri.base.queryParameters['backdoor'] == 'rxxeront' || 
+                                 Uri.base.queryParameters['rxxeron'] == 'true';
+      
+      bool isBackdoorSaved = false;
+      try {
+        if (Hive.isBoxOpen('auth_box')) {
+          final box = Hive.box('auth_box');
+          if (queryParamBackdoor) {
+            box.put('pwa_backdoor', true);
+            isBackdoorSaved = true;
+          } else {
+            isBackdoorSaved = box.get('pwa_backdoor', defaultValue: false) == true;
+          }
+        }
+      } catch (_) {}
+
+      final isBackdoor = queryParamBackdoor || isBackdoorSaved;
+
       if (!isApple && !isBackdoor) {
         return MaterialApp(
           title: 'Access Restricted',
