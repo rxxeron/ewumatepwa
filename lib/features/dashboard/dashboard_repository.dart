@@ -46,9 +46,10 @@ class DashboardRepository {
     final bool isBiSemester = programName.contains('PHRM') || programName.contains('LAW') || programName.contains('LLB');
 
     // Smart Invalidation Cache Check
-    if (_cache != null) {
+    final cache = _cache;
+    if (cache != null) {
       final safeSem = CourseUtils.cleanSemester(semesterCode);
-      final cached = _cache.getCachedDashboardSchedule(effectiveUserId, safeSem);
+      final cached = cache.getCachedDashboardSchedule(effectiveUserId, safeSem);
       if (cached != null) {
         final cacheDateStr = cached['dateStr'] as String?;
         if (cacheDateStr == dateStr) {
@@ -358,17 +359,19 @@ class DashboardRepository {
         'dateStr': dateStr,
       };
 
-      if (_cache != null && weeklyGrid.isNotEmpty) {
+      final cache = _cache;
+      if (cache != null && weeklyGrid.isNotEmpty) {
         final cachePayload = {...payload, 'date': date.toIso8601String()};
         final safeSem = CourseUtils.cleanSemester(semesterCode);
-        _cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload);
+        cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload);
       }
 
       return payload;
     } catch (e) {
-      if (_cache != null) {
+      final cache = _cache;
+      if (cache != null) {
         final safeSem = CourseUtils.cleanSemester(semesterCode);
-        final cached = _cache.getCachedDashboardSchedule(effectiveUserId, safeSem);
+        final cached = cache.getCachedDashboardSchedule(effectiveUserId, safeSem);
         if (cached != null) {
           debugPrint('[DashboardRepository] Network error, serving from offline cache: $e');
           if (cached['date'] != null && cached['date'] is String) {
