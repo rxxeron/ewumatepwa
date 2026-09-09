@@ -25,12 +25,15 @@ messaging.onBackgroundMessage((payload) => {
   // Robust parsing to support data-only payloads safely
   const title = (payload.data && payload.data.title) || "EWUMate Notification";
   const body = (payload.data && payload.data.body) || "";
+  const imageUrl = (payload.data && (payload.data.image || payload.data.image_url || payload.data.imageUrl)) || "";
   
   const notificationOptions = {
     body: body,
     icon: "/icons/Icon-192.png",
+    ...(imageUrl ? { image: imageUrl } : {}),
     data: {
-      url: (payload.data && payload.data.url) ? payload.data.url : "/"
+      url: (payload.data && payload.data.url) ? payload.data.url : "/",
+      ...(imageUrl ? { image: imageUrl } : {})
     }
   };
 
@@ -46,9 +49,10 @@ self.addEventListener('notificationclick', (event) => {
   const title = fcmMsg && fcmMsg.notification ? fcmMsg.notification.title : (event.notification.title || "EWUMate Notification");
   const body = fcmMsg && fcmMsg.notification ? fcmMsg.notification.body : (event.notification.body || "");
   const clickUrl = fcmMsg && fcmMsg.data ? fcmMsg.data.url : (event.notification.data && event.notification.data.url);
+  const clickImage = (fcmMsg && fcmMsg.notification && fcmMsg.notification.image) || (fcmMsg && fcmMsg.data && (fcmMsg.data.image || fcmMsg.data.image_url)) || (event.notification.data && (event.notification.data.image || event.notification.data.image_url)) || "";
   
   // Construct the query parameters
-  const queryParams = `?notif_title=${encodeURIComponent(title)}&notif_body=${encodeURIComponent(body)}&notif_url=${encodeURIComponent(clickUrl || '')}`;
+  const queryParams = `?notif_title=${encodeURIComponent(title)}&notif_body=${encodeURIComponent(body)}&notif_url=${encodeURIComponent(clickUrl || '')}&notif_image=${encodeURIComponent(clickImage || '')}`;
   const targetUrl = "/";
   
   event.waitUntil(
