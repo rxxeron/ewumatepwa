@@ -25,12 +25,15 @@ messaging.onBackgroundMessage((payload) => {
   // Robust parsing to support data-only payloads safely
   const title = (payload.data && payload.data.title) || "EWUMate Notification";
   const body = (payload.data && payload.data.body) || "";
+  const imageUrl = (payload.data && (payload.data.image || payload.data.image_url || payload.data.imageUrl)) || "";
   
   const notificationOptions = {
     body: body,
     icon: "/icons/Icon-192.png",
+    ...(imageUrl ? { image: imageUrl } : {}),
     data: {
-      url: (payload.data && payload.data.url) ? payload.data.url : "/"
+      url: (payload.data && payload.data.url) ? payload.data.url : "/",
+      ...(imageUrl ? { image: imageUrl } : {})
     }
   };
 
@@ -40,19 +43,30 @@ messaging.onBackgroundMessage((payload) => {
 // Navigate/focus standalone PWA window on click
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const targetUrl = (event.notification.data && event.notification.data.url) ? event.notification.data.url : "/";
+  
+  // Extract parameters securely from the FCM_MSG object or event data
+  const fcmMsg = event.notification.data && event.notification.data.FCM_MSG;
+  const title = fcmMsg && fcmMsg.notification ? fcmMsg.notification.title : (event.notification.title || "EWUMate Notification");
+  const body = fcmMsg && fcmMsg.notification ? fcmMsg.notification.body : (event.notification.body || "");
+  const clickUrl = fcmMsg && fcmMsg.data ? fcmMsg.data.url : (event.notification.data && event.notification.data.url);
+  const clickImage = (fcmMsg && fcmMsg.notification && fcmMsg.notification.image) || (fcmMsg && fcmMsg.data && (fcmMsg.data.image || fcmMsg.data.image_url)) || (event.notification.data && (event.notification.data.image || event.notification.data.image_url)) || "";
+  
+  // Construct the query parameters
+  const queryParams = `?notif_title=${encodeURIComponent(title)}&notif_body=${encodeURIComponent(body)}&notif_url=${encodeURIComponent(clickUrl || '')}&notif_image=${encodeURIComponent(clickImage || '')}`;
+  const targetUrl = "/";
   
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // If a window is already open at the target URL, focus it
+      // If a window is already open, navigate it to the notification URL and focus it
       for (const client of clientList) {
-        if (client.url === targetUrl && 'focus' in client) {
+        if ('focus' in client && 'navigate' in client) {
+          client.navigate(targetUrl + queryParams);
           return client.focus();
         }
       }
-      // Otherwise, open a new window/tab
+      // Otherwise, open a new window
       if (clients.openWindow) {
-        return clients.openWindow(targetUrl);
+        return clients.openWindow(targetUrl + queryParams);
       }
     })
   );
