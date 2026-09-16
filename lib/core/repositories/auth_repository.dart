@@ -1,10 +1,9 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:flutter/foundation.dart';
 import '../providers/supabase_provider.dart';
 import '../services/cache_service.dart';
 import '../models/profile.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 part 'auth_repository.g.dart';
@@ -77,22 +76,59 @@ class AuthRepository {
     }
   }
 
-  // Google Sign In - Dynamic redirect based on the active origin for zero-wait authentication
-  Future<bool> signInWithGoogle() async {
-    final String redirectTo;
-    if (kIsWeb) {
-      // Dynamically resolve active origin to prevent cross-site session mismatches
-      redirectTo = Uri.base.origin;
-      debugPrint('[AuthRepository] Web Google Sign-In redirecting back to: $redirectTo');
-    } else {
-      redirectTo = 'io.supabase.ewumate://login-callback';
+  // Google Sign In
+  Future<AuthResponse> signInWithGoogle() async {
+    final googleSignIn = GoogleSignIn(
+      serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
+    );
+
+    // Force the account picker
+    await googleSignIn.signOut();
+    final googleUser = await googleSignIn.signIn();
+    if (googleUser == null) throw 'Login cancelled';
+
+    final googleAuth = await googleUser.authentication;
+    final accessToken = googleAuth.accessToken;
+    final idToken = googleAuth.idToken;
+
+    if (idToken == null) throw 'No ID Token found.';
+
+    final response = await _supabase.auth.signInWithIdToken(
+      provider: OAuthProvider.google,
+      idToken: idToken,
+      accessToken: accessToken,
+    );
+
+    // Ensure profile exists immediately after login
+    final user = response.user;
+    if (user != null) {
+      final existingProfile = await _supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (existingProfile == null) {
+        final fullName = user.userMetadata?['full_name'] ?? 
+                         user.userMetadata?['name'] ?? 
+                         user.userMetadata?['displayName'] ?? 
+                         'New Student';
+        
+        await _supabase.from('profiles').upsert({
+          'id': user.id,
+          'full_name': fullName,
+          'nickname': fullName.toString().split(' ').first,
+          'photo_url': user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+          'onboarding_status': 'registered',
+        });
+      }
+      // Persistence: Save identity to local cache for Zero-Wait entry
+      await _cache.saveLastUserId(user.id);
     }
 
-    return await _supabase.auth.signInWithOAuth(
-      OAuthProvider.google,
-      redirectTo: redirectTo,
-    );
+    return response;
   }
+
 }
 
 @riverpod

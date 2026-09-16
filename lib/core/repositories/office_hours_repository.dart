@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,15 +51,16 @@ class OfficeHoursRepository {
     }
   }
 
-  // Upload proof bytes and submit multiple office hours rows
+  // Upload proof and submit multiple office hours rows
   Future<void> submitOfficeHours({
-    required Uint8List fileBytes,
+    required File file,
     required String fileName,
     required String facultyInitials,
     required List<Map<String, String>> slots,
     required String semesterCode,
     String? officeRoom,
   }) async {
+    final fileBytes = await file.readAsBytes();
     final fileSizeBytes = fileBytes.length;
 
     // 1. Request secure resumable upload URL from Supabase Edge Function

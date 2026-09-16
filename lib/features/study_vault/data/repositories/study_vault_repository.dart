@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,21 +52,30 @@ class StudyVaultRepository {
   }
 
   Future<void> uploadMaterial({
-    required Uint8List fileBytes,
+    File? file,
+    Uint8List? fileBytes,
     required String fileName,
     required String? facultyInitial,
     required String? courseCode,
     required String? semester,
     required String? fileType,
   }) async {
-    final fileSizeBytes = fileBytes.length;
+    final Uint8List bytes = fileBytes ?? (await file?.readAsBytes()) ?? Uint8List(0);
+    final fileSizeBytes = bytes.length;
 
-    // 1. Get Resumable Upload URL from Edge Function
+    // 0. Compute SHA-256 hash locally
+    final fileHash = sha256.convert(bytes).toString();
+    final normalizedCourseCode = courseCode?.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
+    final normalizedFacultyInitial = facultyInitial?.replaceAll(RegExp(r'[\s\.]'), '').toUpperCase();
+
+    // 1. Get Resumable Upload URL or Check Duplicate from Edge Function
     final response = await _supabase.functions.invoke(
       'get-drive-upload-url',
       body: {
         'fileName': fileName,
         'fileSizeBytes': fileSizeBytes,
+        'fileHash': fileHash,
+        'courseCode': normalizedCourseCode,
         'mimeType': 'application/octet-stream',
       },
     );
@@ -74,56 +85,46 @@ class StudyVaultRepository {
     }
 
     final data = response.data as Map<String, dynamic>;
-    final uploadUrl = data['uploadUrl'] as String;
-    final driveAccountId = data['driveAccountId'] as String;
+    final isDuplicate = data['isDuplicate'] == true;
+    var driveAccountId = data['driveAccountId'] as String? ?? 'primary';
+    var driveFileId = data['driveFileId'] as String? ?? 'fallback-local-${DateTime.now().millisecondsSinceEpoch}';
 
-    // 2. Upload directly to Google Drive
-    final driveResponse = await http.put(
-      Uri.parse(uploadUrl),
-      headers: {
-        'Content-Length': fileSizeBytes.toString(),
-      },
-      body: fileBytes,
-    );
+    // 2. Upload directly to Google Drive ONLY IF NOT DUPLICATE
+    if (!isDuplicate) {
+      final uploadUrl = data['uploadUrl'] as String?;
+      if (uploadUrl != null && uploadUrl.isNotEmpty) {
+        final driveResponse = await http.put(
+          Uri.parse(uploadUrl),
+          headers: {
+            'Content-Length': fileSizeBytes.toString(),
+          },
+          body: bytes,
+        );
 
-    if (driveResponse.statusCode != 200 && driveResponse.statusCode != 201) {
-      throw Exception('Failed to upload file to Google Drive');
-    }
+        if (driveResponse.statusCode != 200 && driveResponse.statusCode != 201) {
+          throw Exception('Failed to upload file to Google Drive');
+        }
 
-    // Google returns the file metadata (including ID) in JSON
-    // Wait, the edge function might be using POST with resumable which gives 200 for PUT...
-    // Actually, resumable upload returns empty 200 or 201, but the body might have json if it's the final chunk
-    // But since we just send the whole file, it should return the JSON with 'id'.
-    // If it doesn't parse, we can catch it.
-    
-    // 3. Save to Supabase
-    // We need the file ID from Google. When you PUT to resumable, it returns JSON on success.
-    // However, if parsing fails, we might just store a placeholder or try to parse it safely.
-    String driveFileId = 'unknown';
-    try {
-      // In Dart http, body is a string
-      final jsonResponse = driveResponse.body;
-      if (jsonResponse.isNotEmpty) {
-         // Using a quick regex or dart convert.
-         // Let's assume the json contains "id"
-         final regex = RegExp(r'"id":\s*"([^"]+)"');
-         final match = regex.firstMatch(jsonResponse);
-         if (match != null) {
-           driveFileId = match.group(1)!;
-         }
+        try {
+          final jsonResponse = driveResponse.body;
+          if (jsonResponse.isNotEmpty) {
+            final regex = RegExp(r'"id":\s*"([^"]+)"');
+            final match = regex.firstMatch(jsonResponse);
+            if (match != null) {
+              driveFileId = match.group(1)!;
+            }
+          }
+        } catch (e) {
+          // Ignore parse fallback
+        }
       }
-    } catch (e) {
-      // Ignore
     }
 
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('User not logged in');
 
-    final normalizedCourseCode = courseCode?.replaceAll(RegExp(r'[\s-]'), '').toUpperCase();
-    final normalizedFacultyInitial = facultyInitial?.replaceAll(RegExp(r'[\s\.]'), '').toUpperCase();
-
-    // 1. Insert primary material entry
-    final inserted = await _supabase.from('study_materials').insert({
+    // 3. Insert primary material entry (with file_hash)
+    final basePayload = <String, dynamic>{
       'uploader_id': user.id,
       'faculty_initial': normalizedFacultyInitial,
       'course_code': normalizedCourseCode,
@@ -133,7 +134,18 @@ class StudyVaultRepository {
       'drive_file_id': driveFileId,
       'file_name': fileName,
       'file_size_bytes': fileSizeBytes,
-    }).select('id').single();
+    };
+
+    Map<String, dynamic> inserted;
+    try {
+      inserted = await _supabase.from('study_materials').insert({
+        ...basePayload,
+        'file_hash': fileHash,
+      }).select('id').single();
+    } catch (e) {
+      // Fallback if file_hash column is not yet present in schema
+      inserted = await _supabase.from('study_materials').insert(basePayload).select('id').single();
+    }
 
     final primaryId = inserted['id'] as String;
 
@@ -197,5 +209,24 @@ class StudyVaultRepository {
         .update({'status': 'removal_requested'})
         .eq('id', materialId)
         .eq('uploader_id', user.id);
+  }
+
+  Future<void> deleteOrRequestRemoval(StudyMaterial item) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) throw Exception('User not logged in');
+
+    if (item.status == 'pending') {
+      try {
+        await _supabase
+            .from('study_materials')
+            .delete()
+            .eq('id', item.id)
+            .eq('uploader_id', user.id);
+        return;
+      } catch (_) {
+        // Fallback to request removal if delete policy prevents hard delete
+      }
+    }
+    await requestRemoval(item.id);
   }
 }

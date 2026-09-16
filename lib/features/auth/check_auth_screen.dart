@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/widgets/sky_animation.dart';
 import '../../core/widgets/animated_startup_cover.dart';
+import '../../core/services/tutorial_service.dart';
 import 'auth_providers.dart';
 import '../../core/repositories/auth_repository.dart' hide authStateProvider;
 import '../../core/services/cache_service.dart';
@@ -18,7 +19,6 @@ class CheckAuthScreen extends ConsumerStatefulWidget {
 
 class _CheckAuthScreenState extends ConsumerState<CheckAuthScreen> {
   Timer? _stallTimer;
-  bool _showRetry = false;
   final DateTime _initTime = DateTime.now();
 
   @override
@@ -41,12 +41,11 @@ class _CheckAuthScreenState extends ConsumerState<CheckAuthScreen> {
   }
 
   void _startStallTimer() {
-    setState(() => _showRetry = false);
     _stallTimer?.cancel();
     _stallTimer = Timer(const Duration(seconds: 45), () {
       if (mounted) {
         debugPrint("[CheckAuth] STALL DETECTED: Screen stuck for 45s. Showing retry option.");
-        setState(() => _showRetry = true);
+        setState(() {});
       }
     });
   }
@@ -71,10 +70,9 @@ class _CheckAuthScreenState extends ConsumerState<CheckAuthScreen> {
               data: (profile) {
                 _stallTimer?.cancel();
 
-                // 0. Primary Auth Check: If the Supabase session is null and no cached profile, they are signed out
+                // 0. Primary Auth Check: If the Supabase session is null, they are signed out
                 final hasSession = Supabase.instance.client.auth.currentSession != null;
-                final hasCache = profile != null;
-                if (user == null && !hasSession && !hasCache) {
+                if (user == null && !hasSession) {
                   debugPrint("[CheckAuth] User is signed out. Redirecting to Login.");
                   _navigateWithDelay('/login');
                   return const CircularProgressBinding(text: 'Redirecting to login...');
@@ -104,7 +102,9 @@ class _CheckAuthScreenState extends ConsumerState<CheckAuthScreen> {
                     final hasLastUser = ref.read(cacheServiceProvider).getLastUserId() != null;
                     if (mounted && user == null && Supabase.instance.client.auth.currentUser == null && !hasLastUser) {
                       debugPrint("[CheckAuth] No current user and no cached identity. Redirecting to login.");
-                      context.go('/login');
+                      if (context.mounted) {
+                        context.go('/login');
+                      }
                     }
                   });
                   return const CircularProgressBinding(text: 'Searching for you...');
@@ -134,7 +134,7 @@ class _CheckAuthScreenState extends ConsumerState<CheckAuthScreen> {
                   message: 'Connection issue: $err',
                   onRetry: () {
                     _startStallTimer();
-                    ref.refresh(profileProvider);
+                    ref.invalidate(profileProvider);
                   },
                 );
               },
@@ -166,7 +166,8 @@ class _GradeBlockerWrapper extends ConsumerWidget {
         if (requiresGrade) {
           onNavigate('/results/grade-entry');
         } else {
-          onNavigate('/dashboard');
+          // Check if welcome tour needs to be shown
+          _checkWelcomeTourAndNavigate();
         }
         return const CircularProgressBinding(text: 'Preparing Dashboard...');
       },
@@ -176,6 +177,15 @@ class _GradeBlockerWrapper extends ConsumerWidget {
       ),
       loading: () => const CircularProgressBinding(),
     );
+  }
+
+  Future<void> _checkWelcomeTourAndNavigate() async {
+    final hasSeenTour = await TutorialService().hasCompletedWelcomeTour();
+    if (!hasSeenTour) {
+      onNavigate('/onboarding/welcome-tour');
+    } else {
+      onNavigate('/dashboard');
+    }
   }
 }
 
@@ -282,7 +292,7 @@ class _ErrorView extends ConsumerWidget {
 
 class CircularProgressBinding extends StatelessWidget {
   final String text;
-  const CircularProgressBinding({super.key, this.text = 'Syncing Universe...'});
+  const CircularProgressBinding({super.key, this.text = 'Syncing universe...'});
 
   @override
   Widget build(BuildContext context) {

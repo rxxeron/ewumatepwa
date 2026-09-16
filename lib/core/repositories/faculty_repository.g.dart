@@ -36,7 +36,7 @@ final allFacultyProvider = AutoDisposeFutureProvider<List<Faculty>>.internal(
 );
 
 typedef AllFacultyRef = AutoDisposeFutureProviderRef<List<Faculty>>;
-String _$facultySectionsHash() => r'519d6214c7463b88a825f919e3899d2244f1eefa';
+String _$facultySectionsHash() => r'b633334bc6df305c72dff2b7b8f9a22a093b6879';
 
 /// Copied from Dart SDK
 class _SystemHash {
@@ -71,7 +71,7 @@ class FacultySectionsFamily extends Family<AsyncValue<List<CourseSection>>> {
   /// See also [facultySections].
   FacultySectionsProvider call({
     required String initials,
-    required String? semesterCode,
+    required String semesterCode,
   }) {
     return FacultySectionsProvider(
       initials: initials,
@@ -110,7 +110,7 @@ class FacultySectionsProvider
   /// See also [facultySections].
   FacultySectionsProvider({
     required String initials,
-    required String? semesterCode,
+    required String semesterCode,
   }) : this._internal(
           (ref) => facultySections(
             ref as FacultySectionsRef,
@@ -142,7 +142,7 @@ class FacultySectionsProvider
   }) : super.internal();
 
   final String initials;
-  final String? semesterCode;
+  final String semesterCode;
 
   @override
   Override overrideWith(
@@ -190,7 +190,7 @@ mixin FacultySectionsRef on AutoDisposeFutureProviderRef<List<CourseSection>> {
   String get initials;
 
   /// The parameter `semesterCode` of this provider.
-  String? get semesterCode;
+  String get semesterCode;
 }
 
 class _FacultySectionsProviderElement
@@ -201,7 +201,7 @@ class _FacultySectionsProviderElement
   @override
   String get initials => (origin as FacultySectionsProvider).initials;
   @override
-  String? get semesterCode => (origin as FacultySectionsProvider).semesterCode;
+  String get semesterCode => (origin as FacultySectionsProvider).semesterCode;
 }
 // ignore_for_file: type=lint
 // ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member

@@ -20,6 +20,52 @@ class CourseUtils {
     return base;
   }
 
+  /// Returns human-readable course title fallback or known title for standard codes
+  static String getCourseTitle(String code) {
+    if (code.isEmpty) return '';
+    final norm = normalize(code);
+    const titles = {
+      'CSE101': 'Introduction to Computer Science',
+      'CSE103': 'Structured Programming',
+      'CSE106': 'Data Structures',
+      'CSE207': 'Algorithms',
+      'CSE225': 'Data Communication',
+      'CSE246': 'Algorithms Analysis',
+      'CSE251': 'Computer Architecture',
+      'CSE301': 'Database Systems',
+      'CSE302': 'Database Systems Lab',
+      'CSE325': 'Operating Systems',
+      'CSE347': 'Information Systems',
+      'CSE350': 'Software Engineering',
+      'CSE405': 'Computer Networks',
+      'CSE407': 'Artificial Intelligence',
+      'CSE411': 'Compiler Design',
+      'CSE412': 'Web Programming',
+      'MAT101': 'Differential and Integral Calculus',
+      'MAT102': 'Coordinate Geometry & Linear Algebra',
+      'MAT104': 'Differential Equations & Special Functions',
+      'MAT205': 'Probability and Statistics',
+      'PHY101': 'Physics I',
+      'PHY102': 'Physics II',
+      'CHE101': 'Chemistry',
+      'ENG101': 'Basic English',
+      'ENG102': 'English Composition',
+      'ACT101': 'Financial Accounting',
+      'ECO101': 'Principles of Microeconomics',
+      'ECO102': 'Principles of Macroeconomics',
+      'BUS101': 'Introduction to Business',
+      'EEE101': 'Electrical Circuits',
+      'EEE102': 'Electrical Circuits Lab',
+      'EEE105': 'Electronics',
+      'EEE106': 'Electronics Lab',
+      'GEN226': 'Emergence of Bangladesh',
+    };
+    if (titles.containsKey(norm)) return titles[norm]!;
+    final eq = getEquivalent(norm);
+    if (titles.containsKey(eq)) return titles[eq]!;
+    return norm;
+  }
+
   /// Checks if two course codes are functionally equivalent.
   static bool areEquivalent(String? code1, String? code2) {
     if (code1 == null || code2 == null) return false;
@@ -31,9 +77,30 @@ class CourseUtils {
     return e1 == n2 || getEquivalent(n2) == n1;
   }
 
-  /// Centralized semester cleaning (removes spaces, underscores, and lowers case)
+  /// Centralized semester cleaning (removes spaces, underscores, dashes, lowers case, and ensures name+year order)
   static String cleanSemester(String code) {
-    return code.toLowerCase().replaceAll(' ', '').replaceAll('_', '');
+    final s = code.trim().toLowerCase().replaceAll(' ', '').replaceAll('_', '').replaceAll('-', '');
+    final matchYearFirst = RegExp(r'^(\d{4})([a-z]+)$').firstMatch(s);
+    if (matchYearFirst != null) {
+      return '${matchYearFirst.group(2)}${matchYearFirst.group(1)}';
+    }
+    return s;
+  }
+
+  /// Determines if a semester is chronologically before Spring 2025.
+  static bool isSemesterBeforeSpring2025(String? semester) {
+    if (semester == null || semester.isEmpty) return true; // Default to older curriculum
+    final clean = cleanSemester(semester);
+    final reg = RegExp(r'^([a-z]+)(\d{4})$');
+    final match = reg.firstMatch(clean);
+    if (match != null) {
+      final year = int.tryParse(match.group(2)!) ?? 0;
+      if (year < 2025) return true;
+      if (year > 2025) return false;
+      // If year is 2025, Spring 2025 and onwards is new curriculum.
+      return false;
+    }
+    return true;
   }
 
   /// RESTORED: Resolves dynamic table names (e.g., calendar_spring2026_phrm_llb)
@@ -41,7 +108,7 @@ class CourseUtils {
     final safeSem = cleanSemester(semesterCode);
     final table = '${prefix}_$safeSem';
     final isBi = cycleType == 'bi' || cycleType == 'bi_semester' || cycleType == 'phrm_llb' || cycleType == 'bi-semester';
-    final programSpecifier = (isBi) ? '_phrm_llb' : '';
+    final programSpecifier = (prefix == 'calendar' && isBi) ? '_phrm_llb' : '';
     return '$table$programSpecifier';
   }
 
@@ -121,19 +188,33 @@ class CourseUtils {
     return hour + (min / 60.0);
   }
 
-  /// Determines if a session is a Lab based on > 90 min duration or course code ending in L (PHRM).
+  /// Determines if a session is a Lab based on > 90 min duration for 100-400 level courses or PHRM...L.
   static bool isLab(String startTime, String endTime, [String? courseCode]) {
     if (courseCode != null && courseCode.isNotEmpty) {
-      final codeUpper = courseCode.toUpperCase();
+      final codeUpper = courseCode.toUpperCase().replaceAll(' ', '');
       if (codeUpper.startsWith('PHRM') && codeUpper.endsWith('L')) {
         return true;
+      }
+
+      // Check course level number
+      final match = RegExp(r'^\D*(\d{3,4})').firstMatch(codeUpper);
+      if (match != null) {
+        int levelNum = int.tryParse(match.group(1)!) ?? 0;
+        if (levelNum >= 1000) {
+          // 4-digit code e.g. CSE7101 -> 101 level
+          levelNum = int.tryParse(match.group(1)!.substring(1)) ?? 0;
+        }
+        // Graduate level courses (500+) are Theory even with 3-hour slots
+        if (levelNum >= 500) {
+          return false;
+        }
       }
     }
     if (startTime.isEmpty || endTime.isEmpty) return false;
     final start = parseTimeToDouble(startTime);
     final end = parseTimeToDouble(endTime);
-    // 90 minutes = 1.5 hours
-    return (end - start) > 1.51; // .51 to avoid floating point precision issues for exactly 90
+    // 100-400 level courses: > 90 minutes (1.5 hours) is Lab
+    return (end - start) > 1.501;
   }
 
   static double _parseTime(String timeStr) => parseTimeToDouble(timeStr);

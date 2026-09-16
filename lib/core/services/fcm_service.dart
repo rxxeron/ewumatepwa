@@ -1,14 +1,12 @@
 import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../router/app_router.dart';
@@ -49,13 +47,13 @@ class FCMService {
   FCMService(this._ref);
 
   Future<void> initialize() async {
-    print("[FCM] initialize() started...");
     // 0. Register Background Handler
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     // Handle terminated-state notification tap (app was fully closed)
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage != null) {
+      // Add a 2.5 second delay to let the initial GoRouter splash/auth redirects fully settle
       Future.delayed(const Duration(milliseconds: 2500), () {
         final img = initialMessage.notification?.android?.imageUrl ?? 
                     initialMessage.notification?.apple?.imageUrl ?? 
@@ -68,21 +66,6 @@ class FCMService {
           img,
         );
       });
-    }
-
-    // Handle Web PWA URL query parameter notification tap
-    if (kIsWeb) {
-      final params = Uri.base.queryParameters;
-      final notifTitle = params['notif_title'];
-      if (notifTitle != null && notifTitle.isNotEmpty) {
-        final notifBody = params['notif_body'] ?? '';
-        final notifUrl = params['notif_url'];
-        final notifImage = params['notif_image'];
-        // Delay slightly to let splash screen load, then handle action
-        Future.delayed(const Duration(milliseconds: 1500), () {
-          _handleIncomingAction(notifTitle, notifBody, notifUrl, notifImage);
-        });
-      }
     }
 
     // 1. Setup Local Notifications for Foreground and Channel Creation
@@ -100,7 +83,10 @@ class FCMService {
         if (payload != null && payload.isNotEmpty) {
           try {
             final data = jsonDecode(payload);
-            _handleIncomingAction(data['title'], data['body'], data['url'], data['image']);
+            // Slight delay to let any foreground screen state settle
+            Future.delayed(const Duration(milliseconds: 200), () {
+              _handleIncomingAction(data['title'], data['body'], data['url'], data['image']);
+            });
           } catch (_) {}
         }
       },
@@ -124,42 +110,46 @@ class FCMService {
       sound: true,
     );
 
-    // Register message listeners unconditionally so they are active as soon as permission is granted
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      RemoteNotification? notification = message.notification;
-      if (notification != null) {
-        final routingUrl = message.data['url'] as String?;
-        final notifImage = message.notification?.android?.imageUrl ?? 
-                           message.notification?.apple?.imageUrl ?? 
-                           (message.data['image'] as String?) ??
-                           (message.data['image_url'] as String?);
-        
-        // Save locally
-        try {
-          final userId = _supabase.auth.currentUser?.id;
-          if (userId != null) {
-            final newNotif = model.Notification(
-              id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
-              userId: userId,
-              title: notification.title ?? 'No Title',
-              body: notification.body ?? 'No Message',
-              type: message.data['type'] ?? 'system',
-              isRead: false,
-              createdAt: message.sentTime ?? DateTime.now(),
-              payload: message.data.isNotEmpty ? message.data : null,
-            );
-            _ref.read(notificationRepositoryProvider).saveLocalNotification(newNotif);
-          }
-        } catch (_) {}
+    NotificationSettings settings = await _messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
 
-        if (kIsWeb) {
-          showNotificationPopup(
-            notification.title ?? 'No Title',
-            notification.body ?? 'No Message',
-            routingUrl,
-            notifImage,
-          );
-        } else {
+    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+      final token = await _messaging.getToken();
+      if (token != null) {
+        await _saveTokenToDatabase(token);
+      }
+      _messaging.onTokenRefresh.listen(_saveTokenToDatabase);
+
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        RemoteNotification? notification = message.notification;
+        if (notification != null) {
+          final routingUrl = message.data['url'] as String?;
+          final notifImage = message.notification?.android?.imageUrl ?? 
+                             message.notification?.apple?.imageUrl ?? 
+                             (message.data['image'] as String?) ??
+                             (message.data['image_url'] as String?);
+          
+          // Save locally
+          try {
+            final userId = _supabase.auth.currentUser?.id;
+            if (userId != null) {
+              final newNotif = model.Notification(
+                id: message.messageId ?? DateTime.now().millisecondsSinceEpoch.toString(),
+                userId: userId,
+                title: notification.title ?? 'No Title',
+                body: notification.body ?? 'No Message',
+                type: message.data['type'] ?? 'system',
+                isRead: false,
+                createdAt: message.sentTime ?? DateTime.now(),
+                payload: message.data.isNotEmpty ? message.data : null,
+              );
+              _ref.read(notificationRepositoryProvider).saveLocalNotification(newNotif);
+            }
+          } catch (_) {}
+
           _localNotifications.show(
             id: notification.hashCode,
             title: notification.title,
@@ -178,48 +168,28 @@ class FCMService {
             payload: jsonEncode({'title': notification.title, 'body': notification.body, 'url': routingUrl, 'image': notifImage}),
           );
         }
-      }
-    });
-
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      // Add 800ms delay to let the app resume and route state settle perfectly
-      Future.delayed(const Duration(milliseconds: 800), () {
-        final img = message.notification?.android?.imageUrl ?? 
-                    message.notification?.apple?.imageUrl ?? 
-                    (message.data['image'] as String?) ??
-                    (message.data['image_url'] as String?);
-        _handleIncomingAction(
-          message.notification?.title, 
-          message.notification?.body, 
-          message.data['url'] as String?,
-          img,
-        );
       });
-    });
 
-    // Check permission status silently without prompting on startup (mandatory for iOS Safari)
-    NotificationSettings settings = await _messaging.getNotificationSettings();
-    print("[FCM] Current AuthorizationStatus on startup: ${settings.authorizationStatus}");
-
-    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      final vapidKey = kIsWeb ? (dotenv.env['FCM_VAPID_KEY'] ?? 'BO0Po4qenG7jOO_N-TIl1Ers3m46ehFoPthGQJ__Wxz9hjfuNtLNu6lqDsM_Cndjw6AADbo_x-E4K3Nu9mr_dI8') : null;
-      print("[FCM] Fetching token silently with VAPID Key: $vapidKey");
-      try {
-        final token = await _messaging.getToken(vapidKey: vapidKey);
-        print("[FCM] Token retrieved silently on startup: $token");
-        if (token != null) {
-          await _saveTokenToDatabase(token);
-        }
-      } catch (e) {
-        print("[FCM] Silent token retrieval failed: $e");
-      }
-      _messaging.onTokenRefresh.listen(_saveTokenToDatabase);
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        // Add 800ms delay to let the app resume and route state settle perfectly
+        Future.delayed(const Duration(milliseconds: 800), () {
+          final img = message.notification?.android?.imageUrl ?? 
+                      message.notification?.apple?.imageUrl ?? 
+                      (message.data['image'] as String?) ??
+                      (message.data['image_url'] as String?);
+          _handleIncomingAction(
+            message.notification?.title, 
+            message.notification?.body, 
+            message.data['url'] as String?,
+            img,
+          );
+        });
+      });
     }
   }
 
   Future<void> _saveTokenToDatabase(String token) async {
     final user = _supabase.auth.currentUser;
-    print("[FCM] Saving token for user: ${user?.id}");
     if (user != null) {
       try {
         await _supabase.from('fcm_tokens').upsert({
@@ -227,16 +197,15 @@ class FCMService {
           'token': token,
           'updated_at': DateTime.now().toIso8601String(),
         });
-        print("[FCM] Token saved successfully in Supabase!");
       } catch (e) {
-        print("[FCM] Token Registration Failed: $e");
+        debugPrint("[FCM] Token Registration Failed: $e");
       }
     }
   }
 
   void _handleIncomingAction(String? title, String? body, String? url, [String? imageUrl]) {
     if (!isDashboardStable) {
-      print("[FCM] PWA Dashboard not stable yet. Saving pending notification action.");
+      debugPrint("[FCM] Dashboard not stable yet. Saving pending notification action.");
       _pendingAction = PendingNotificationAction(
         title: title ?? 'Notification Received',
         body: body ?? '',
@@ -260,48 +229,6 @@ class FCMService {
       if (context != null) context.go(url);
     } else if (url.startsWith('http')) {
       launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-    }
-  }
-
-  /// Call this from a user gesture (button tap) to request notification permission.
-  /// Required on iOS Safari PWAs where auto-prompting is blocked.
-  Future<bool> requestPermissionAndRegister() async {
-    print("[FCM] requestPermissionAndRegister() called by user gesture...");
-    try {
-      NotificationSettings settings = await _messaging.requestPermission(
-        alert: true,
-        badge: true,
-        sound: true,
-      );
-      print("[FCM] Permission result: ${settings.authorizationStatus}");
-
-      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-        final vapidKey = kIsWeb
-            ? (dotenv.env['FCM_VAPID_KEY'] ??
-                'BO0Po4qenG7jOO_N-TIl1Ers3m46ehFoPthGQJ__Wxz9hjfuNtLNu6lqDsM_Cndjw6AADbo_x-E4K3Nu9mr_dI8')
-            : null;
-        final token = await _messaging.getToken(vapidKey: vapidKey);
-        print("[FCM] Token after permission grant: $token");
-        if (token != null) {
-          await _saveTokenToDatabase(token);
-        }
-        _messaging.onTokenRefresh.listen(_saveTokenToDatabase);
-        return true;
-      }
-      return false;
-    } catch (e) {
-      print("[FCM] requestPermissionAndRegister error: $e");
-      return false;
-    }
-  }
-
-  /// Check if notification permission is already granted (no prompt).
-  Future<bool> isPermissionGranted() async {
-    try {
-      final settings = await _messaging.getNotificationSettings();
-      return settings.authorizationStatus == AuthorizationStatus.authorized;
-    } catch (_) {
-      return false;
     }
   }
 

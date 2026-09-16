@@ -80,7 +80,7 @@ class _CourseMarksEditorScreenState extends ConsumerState<CourseMarksEditorScree
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saved successfully!', style: TextStyle(color: Colors.white)), backgroundColor: Colors.green));
       RefreshUtils.refreshAcademicData(ref);
-      ref.invalidate(semesterProgressDataProvider(widget.courseMarks.semesterCode));
+      ref.invalidate(semesterProgressDataProvider(_currentMarks.semesterCode));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.redAccent));
