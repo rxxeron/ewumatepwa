@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -150,6 +151,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     setState(() => _loading = true);
     try {
       await ref.read(authRepositoryProvider).signInWithGoogle();
+      if (kIsWeb) return; // Browser is navigating to Google OAuth
       ref.invalidate(profileProvider);
       if (mounted) {
         context.go('/');

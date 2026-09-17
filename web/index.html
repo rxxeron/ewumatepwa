@@ -19,6 +19,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Premium Mobile Assistant for East West University Students">
+  <meta name="google-signin-client_id" content="561956344734-ulqeqls9u4h1hmpec41l9lufk336a9ga.apps.googleusercontent.com">
   
   <!-- GitHub Pages SPA routing fix -->
   <style>
@@ -109,6 +110,19 @@
         });
       });
     });
+
+    // Register Firebase Messaging Service Worker for push notifications
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('firebase-messaging-sw.js', {
+          scope: '/firebase-cloud-messaging-push-scope',
+        }).then(function (registration) {
+          console.log('[FCM-SW] Firebase Messaging SW registered, scope:', registration.scope);
+        }).catch(function (err) {
+          console.error('[FCM-SW] Firebase Messaging SW registration failed:', err);
+        });
+      });
+    }
   </script>
 
   <!-- Redirect non-root paths to index.html for SPA routing (GitHub Pages fix) -->

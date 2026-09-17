@@ -29,24 +29,43 @@ final profileProvider = StreamProvider<Profile?>((ref) async* {
     yield Profile.fromJson(cachedData);
   }
 
-  // 2. Background retry loop for online updates
-  while (true) {
+  // 2. Background fetch for online updates
+  int retryCount = 0;
+  while (retryCount < 3) {
     try {
       debugPrint("[ProfileProvider] Attempting Online Fetch for: $userId");
-      final profile = await authRepo.getProfile(userId).timeout(
+      var profile = await authRepo.getProfile(userId).timeout(
         const Duration(seconds: 10),
       );
       
+      if (profile == null && user != null) {
+        // Attempt to auto-create profile if missing (e.g. fresh OAuth login)
+        await authRepo.ensureProfileExists(user);
+        profile = await authRepo.getProfile(userId).timeout(
+          const Duration(seconds: 5),
+        );
+      }
+
       if (profile != null) {
         cacheService.cacheProfile(userId, profile.toJson());
         yield profile;
-        break; 
+        return; 
+      } else {
+        // Profile genuinely not found in DB
+        yield null;
+        return;
       }
     } catch (e) {
       debugPrint("[ProfileProvider] Online failed: $e");
-      
-      // Retry every 5 seconds until success
-      await Future.delayed(const Duration(seconds: 5));
+      retryCount++;
+      if (retryCount >= 3) {
+        if (cachedData == null) {
+          yield null;
+        }
+        return;
+      }
+      // Retry after brief delay
+      await Future.delayed(const Duration(seconds: 2));
     }
   }
 });

@@ -2,11 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'core/config/supabase_config.dart';
 import 'core/router/app_router.dart';
 import 'core/services/cache_service.dart';
 import 'core/services/fcm_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'firebase_options.dart';
 import 'core/providers/session_guardian.dart';
 import 'core/services/update_service.dart';
@@ -28,11 +28,9 @@ void main() async {
       cacheService.init(),
       () async {
         try {
-          if (!kIsWeb) {
-            await Firebase.initializeApp(
-              options: DefaultFirebaseOptions.currentPlatform,
-            );
-          }
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
         } catch (e) {
           if (kDebugMode) debugPrint('Firebase init error: $e');
         }
@@ -45,7 +43,14 @@ void main() async {
     if (kDebugMode) debugPrint('Parallel initialization error: $e');
   }
 
-  // FCM setup moved to MyApp for better Riverpod integration
+  // Register top-level FCM background message handler on mobile platforms
+  if (!kIsWeb) {
+    try {
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      if (kDebugMode) debugPrint('Firebase background handler registration error: $e');
+    }
+  }
 
   runApp(
     ProviderScope(
@@ -71,17 +76,23 @@ class MyApp extends ConsumerWidget {
       ref.read(updateListenerProvider);
     }
     
-    // Initialize FCM when user is logged in (mobile only)
-    if (!kIsWeb) {
-      ref.listen(authStateProvider, (previous, next) {
-        final event = next.value?.event;
-        if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession) {
-          ref.read(fcmServiceProvider).initialize().catchError((err) {
-            if (kDebugMode) debugPrint('FCM Init Error: $err');
-          });
-        }
-      });
-    }
+    // Initialize FCM (Web and Mobile): setup handlers and listeners
+    ref.read(fcmServiceProvider).initialize().catchError((err) {
+      if (kDebugMode) debugPrint('FCM Init Error: $err');
+    });
+
+    ref.listen(authStateProvider, (previous, next) {
+      final session = next.value?.session;
+      if (session != null) {
+        final user = session.user;
+        ref.read(authRepositoryProvider).ensureProfileExists(user).catchError((err) {
+          if (kDebugMode) debugPrint('Ensure profile error: $err');
+        });
+        ref.read(fcmServiceProvider).syncToken().catchError((err) {
+          if (kDebugMode) debugPrint('FCM Sync Error: $err');
+        });
+      }
+    });
     
     final router = ref.watch(appRouterProvider);
 

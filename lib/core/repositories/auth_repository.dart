@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/supabase_provider.dart';
@@ -38,7 +39,7 @@ class AuthRepository {
       password: password,
     );
     if (res.user != null) {
-      await _cache.saveLastUserId(res.user!.id);
+      await ensureProfileExists(res.user!);
     }
     return res;
   }
@@ -76,8 +77,55 @@ class AuthRepository {
     }
   }
 
+  // Ensure profile exists immediately after login
+  Future<void> ensureProfileExists(User user) async {
+    try {
+      final existingProfile = await _supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (existingProfile == null) {
+        final fullName = user.userMetadata?['full_name'] ?? 
+                         user.userMetadata?['name'] ?? 
+                         user.userMetadata?['displayName'] ?? 
+                         'New Student';
+        
+        await _supabase.from('profiles').upsert({
+          'id': user.id,
+          'full_name': fullName,
+          'nickname': fullName.toString().split(' ').first,
+          'photo_url': user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
+          'onboarding_status': 'registered',
+        });
+      }
+      // Persistence: Save identity to local cache for Zero-Wait entry
+      await _cache.saveLastUserId(user.id);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[AuthRepository] ensureProfileExists error: $e');
+    }
+  }
+
   // Google Sign In
-  Future<AuthResponse> signInWithGoogle() async {
+  Future<AuthResponse?> signInWithGoogle() async {
+    if (kIsWeb) {
+      final origin = Uri.base.origin;
+      String redirectUrl;
+      final segments = Uri.base.pathSegments.where((s) => s.isNotEmpty).toList();
+      if (segments.isNotEmpty && segments.first == 'ewumatepwa') {
+        redirectUrl = '$origin/ewumatepwa/';
+      } else {
+        redirectUrl = '$origin/';
+      }
+
+      await _supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: redirectUrl,
+      );
+      return null;
+    }
+
     final googleSignIn = GoogleSignIn(
       serverClientId: dotenv.env['GOOGLE_WEB_CLIENT_ID'],
     );
@@ -102,28 +150,7 @@ class AuthRepository {
     // Ensure profile exists immediately after login
     final user = response.user;
     if (user != null) {
-      final existingProfile = await _supabase
-          .from('profiles')
-          .select('id')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (existingProfile == null) {
-        final fullName = user.userMetadata?['full_name'] ?? 
-                         user.userMetadata?['name'] ?? 
-                         user.userMetadata?['displayName'] ?? 
-                         'New Student';
-        
-        await _supabase.from('profiles').upsert({
-          'id': user.id,
-          'full_name': fullName,
-          'nickname': fullName.toString().split(' ').first,
-          'photo_url': user.userMetadata?['avatar_url'] ?? user.userMetadata?['picture'],
-          'onboarding_status': 'registered',
-        });
-      }
-      // Persistence: Save identity to local cache for Zero-Wait entry
-      await _cache.saveLastUserId(user.id);
+      await ensureProfileExists(user);
     }
 
     return response;
