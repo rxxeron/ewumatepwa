@@ -16,23 +16,26 @@ const messaging = firebase.messaging();
 messaging.onBackgroundMessage((payload) => {
   console.log("[firebase-messaging-sw.js] Background message intercepted: ", payload);
   
-  // If the browser already shows a default notification because the payload has a 'notification' object,
-  // we return early to avoid displaying a duplicate notification.
-  if (payload.notification) {
-    return;
-  }
+  const title = (payload.notification && payload.notification.title) || 
+                (payload.data && payload.data.title) || 
+                "EWUMate Notification";
+  const body = (payload.notification && payload.notification.body) || 
+               (payload.data && payload.data.body) || 
+               "";
+  const imageUrl = (payload.notification && payload.notification.image) || 
+                   (payload.data && (payload.data.image || payload.data.image_url || payload.data.imageUrl)) || 
+                   "";
+  const clickUrl = (payload.data && payload.data.url) || 
+                   (payload.fcmOptions && payload.fcmOptions.link) || 
+                   "/";
 
-  // Robust parsing to support data-only payloads safely
-  const title = (payload.data && payload.data.title) || "EWUMate Notification";
-  const body = (payload.data && payload.data.body) || "";
-  const imageUrl = (payload.data && (payload.data.image || payload.data.image_url || payload.data.imageUrl)) || "";
-  
   const notificationOptions = {
     body: body,
     icon: "/icons/Icon-192.png",
+    badge: "/icons/Icon-192.png",
     ...(imageUrl ? { image: imageUrl } : {}),
     data: {
-      url: (payload.data && payload.data.url) ? payload.data.url : "/",
+      url: clickUrl,
       ...(imageUrl ? { image: imageUrl } : {})
     }
   };
