@@ -34,8 +34,9 @@ final fcmServiceProvider = Provider<FCMService>((ref) => FCMService(ref));
 
 class FCMService {
   final Ref _ref;
-  final FirebaseMessaging _messaging = FirebaseMessaging.instance;
-  final SupabaseClient _supabase = Supabase.instance.client;
+  FirebaseMessaging? _messagingInstance;
+  FirebaseMessaging get _messaging => _messagingInstance ??= FirebaseMessaging.instance;
+  SupabaseClient get _supabase => Supabase.instance.client;
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
   bool isDashboardStable = false;
@@ -49,6 +50,15 @@ class FCMService {
   FCMService(this._ref);
 
   Future<void> initialize() async {
+    try {
+      if (Firebase.apps.isEmpty) {
+        debugPrint('[FCM] Firebase not initialized. Skipping FCM setup.');
+        return;
+      }
+    } catch (e) {
+      debugPrint('[FCM] Firebase check notice: $e');
+      return;
+    }
     // 0. On Web, check URL parameters from firebase-messaging-sw.js click
     if (kIsWeb) {
       try {
@@ -252,22 +262,28 @@ class FCMService {
   }
 
   /// Explicitly retrieve the device token and register it with the current user in Supabase
-  Future<void> syncToken() async {
+  Future<void> syncToken([int retryCount = 0]) async {
     try {
+      if (Firebase.apps.isEmpty) return;
       final vapidKey = kIsWeb ? 'BO0Po4qenG7jOO_N-TIl1Ers3m46ehFoPthGQJ__Wxz9hjfuNtLNu6lqDsM_Cndjw6AADbo_x-E4K3Nu9mr_dI8' : null;
       final token = await _messaging.getToken(vapidKey: vapidKey);
       if (token != null) {
-        await _saveTokenToDatabase(token);
+        final saved = await _saveTokenToDatabase(token);
+        if (!saved && retryCount < 3) {
+          Future.delayed(Duration(seconds: (retryCount + 1) * 2), () {
+            syncToken(retryCount + 1);
+          });
+        }
       }
     } catch (e) {
       debugPrint("[FCM] syncToken error: $e");
     }
   }
 
-  Future<void> _saveTokenToDatabase(String token) async {
-    final user = _supabase.auth.currentUser;
-    if (user != null) {
-      try {
+  Future<bool> _saveTokenToDatabase(String token) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
         await _supabase.from('fcm_tokens').upsert({
           'user_id': user.id,
           'token': token,
@@ -275,12 +291,14 @@ class FCMService {
           'updated_at': DateTime.now().toIso8601String(),
         }, onConflict: 'token');
         debugPrint("[FCM] Token saved successfully for user ${user.id} on ${kIsWeb ? 'web' : defaultTargetPlatform.name}");
-      } catch (e) {
-        debugPrint("[FCM] Token Registration Failed: $e");
+        return true;
+      } else {
+        debugPrint("[FCM] No current user signed in. Token will sync upon session restoration.");
       }
-    } else {
-      debugPrint("[FCM] No current user signed in. Token will sync upon login.");
+    } catch (e) {
+      debugPrint("[FCM] Token Registration Failed: $e");
     }
+    return false;
   }
 
   /// Call this from a user gesture (button tap) to request notification permission.

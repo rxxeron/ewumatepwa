@@ -19,6 +19,36 @@ void main() async {
   configureUrlStrategy();
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Protect against release-mode white screen if any widget error occurs
+  ErrorWidget.builder = (FlutterErrorDetails details) {
+    return Material(
+      color: const Color(0xFF071426),
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.refresh_rounded, color: Color(0xFF19D9F5), size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  'Starting EWUmate...',
+                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  kDebugMode ? details.exceptionAsString() : 'Connecting services, please wait...',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  };
 
   // Initialize Cache Service (Hive), Firebase, and Supabase in parallel
   final cacheService = CacheService();
@@ -76,9 +106,15 @@ class MyApp extends ConsumerWidget {
       ref.read(updateListenerProvider);
     }
     
-    // Initialize FCM (Web and Mobile): setup handlers and listeners
-    ref.read(fcmServiceProvider).initialize().catchError((err) {
-      if (kDebugMode) debugPrint('FCM Init Error: $err');
+    // Initialize FCM safely post-frame so widget build is never blocked
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        ref.read(fcmServiceProvider).initialize().catchError((err) {
+          if (kDebugMode) debugPrint('FCM Init Error: $err');
+        });
+      } catch (e) {
+        if (kDebugMode) debugPrint('FCM post-frame init notice: $e');
+      }
     });
 
     ref.listen(authStateProvider, (previous, next) {
