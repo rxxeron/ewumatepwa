@@ -14,7 +14,7 @@ import '../../core/widgets/animations/skeleton_loader.dart';
 import '../../core/widgets/ewumate_app_bar.dart';
 import '../../core/widgets/onboarding_overlay.dart';
 import '../../core/constants/onboarding_steps.dart';
-import '../../core/widgets/playstore_review_dialog.dart';
+import '../faculty_directory/presentation/widgets/faculty_reviews_spotlight_dialog.dart';
 import '../auth/auth_providers.dart';
 import '../tasks/presentation/widgets/add_task_bottom_sheet.dart';
 import 'controllers/dashboard_controller.dart';
@@ -59,7 +59,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        PlayStoreReviewDialog.checkAndShow(context);
+        FacultyReviewsSpotlightDialog.checkAndShow(context);
       }
     });
 

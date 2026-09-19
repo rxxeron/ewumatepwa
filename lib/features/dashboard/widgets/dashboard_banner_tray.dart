@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart' as url_launcher;
+import '../../../core/services/fcm_service.dart';
 import '../../../core/theme/ewu_theme_extension.dart';
 
 class DashboardBannerTray extends ConsumerStatefulWidget {
@@ -27,12 +30,71 @@ class DashboardBannerTray extends ConsumerStatefulWidget {
 }
 
 class _DashboardBannerTrayState extends ConsumerState<DashboardBannerTray> {
+  static const String _kFacultyReviewsBannerKey = 'faculty_reviews_banner_dismissed_v1';
   bool _isExpanded = false;
+  bool _isFacultyReviewsDismissed = true;
+  bool _isNotificationPermissionGranted = true;
+  bool _isNotificationBannerDismissed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFacultyReviewsBanner();
+    _checkNotificationPermission();
+  }
+
+  Future<void> _checkFacultyReviewsBanner() async {
+    final prefs = await SharedPreferences.getInstance();
+    final dismissed = prefs.getBool(_kFacultyReviewsBannerKey) ?? false;
+    if (mounted) {
+      setState(() => _isFacultyReviewsDismissed = dismissed);
+    }
+  }
+
+  Future<void> _dismissFacultyReviewsBanner() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kFacultyReviewsBannerKey, true);
+    if (mounted) {
+      setState(() => _isFacultyReviewsDismissed = true);
+    }
+  }
+
+  Future<void> _checkNotificationPermission() async {
+    try {
+      final granted = await ref.read(fcmServiceProvider).isPermissionGranted();
+      if (mounted) {
+        setState(() {
+          _isNotificationPermissionGranted = granted;
+        });
+      }
+    } catch (_) {}
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.ewuColors;
     final List<Widget> activeBanners = [];
+
+    // 0. Notification Permission Banner (Prompt if not granted in PWA/browser)
+    if (!_isNotificationPermissionGranted && !_isNotificationBannerDismissed) {
+      activeBanners.add(_buildAlertCard(
+        context,
+        icon: Icons.notifications_off_rounded,
+        iconColor: const Color(0xFFF59E0B),
+        title: "Notifications are Disabled",
+        subtitle: "Enable notifications to receive class routines, exam alerts & announcements.",
+        actionLabel: "Enable",
+        onAction: () async {
+          final granted = await ref.read(fcmServiceProvider).requestPermissionAndRegister();
+          if (mounted) {
+            setState(() {
+              _isNotificationPermissionGranted = granted;
+            });
+          }
+        },
+        onDismiss: () => setState(() => _isNotificationBannerDismissed = true),
+      ));
+    }
 
     // 1. App Update Banner
     if (widget.showUpdateBanner) {
@@ -45,6 +107,20 @@ class _DashboardBannerTrayState extends ConsumerState<DashboardBannerTray> {
         actionLabel: "Update",
         onAction: () => url_launcher.launchUrl(Uri.parse(widget.updateUrl), mode: url_launcher.LaunchMode.externalApplication),
         onDismiss: widget.onDismissUpdate,
+      ));
+    }
+
+    // 2. Faculty Reviews Feature Announcement Banner
+    if (!_isFacultyReviewsDismissed) {
+      activeBanners.add(_buildAlertCard(
+        context,
+        icon: Icons.rate_review_rounded,
+        iconColor: const Color(0xFF00E5FF),
+        title: "New: Faculty Reviews & Scorecards",
+        subtitle: "Check authentic student evaluations, grading fairness & exam tips.",
+        actionLabel: "Explore",
+        onAction: () => context.push('/services/faculty-directory'),
+        onDismiss: _dismissFacultyReviewsBanner,
       ));
     }
 

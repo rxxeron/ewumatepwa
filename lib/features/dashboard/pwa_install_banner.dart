@@ -30,11 +30,11 @@ class PwaInstallBanner extends ConsumerWidget {
         width: double.infinity,
         borderRadius: BorderRadius.circular(24),
         borderWidth: 1.5,
-        borderColor: Colors.white.withOpacity(0.12),
+        borderColor: Colors.white.withValues(alpha: 0.12),
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF1E293B).withOpacity(0.65),
-            const Color(0xFF0F172A).withOpacity(0.85),
+            const Color(0xFF1E293B).withValues(alpha: 0.65),
+            const Color(0xFF0F172A).withValues(alpha: 0.85),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -64,7 +64,7 @@ class PwaInstallBanner extends ConsumerWidget {
                           : 'Install EWUMate on your home screen for quick, offline routine & grade tracking.',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Colors.white.withOpacity(0.7),
+                        color: Colors.white.withValues(alpha: 0.7),
                         height: 1.3,
                       ),
                     ),
@@ -103,9 +103,9 @@ class PwaInstallBanner extends ConsumerWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD4AF37).withOpacity(0.15),
+                    color: const Color(0xFFD4AF37).withValues(alpha: 0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFD4AF37).withOpacity(0.4), width: 1.5),
+                    border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.4), width: 1.5),
                   ),
                   child: const Icon(
                     Icons.ios_share_rounded,

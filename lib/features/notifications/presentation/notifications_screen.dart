@@ -25,6 +25,7 @@ class NotificationsScreen extends ConsumerStatefulWidget {
 class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   Timer? _refreshTimer;
   String _selectedFilter = 'All';
+  bool _isNotificationPermissionGranted = true;
 
   final List<String> _filterOptions = ['All', 'Unread', 'Schedule', 'Tasks', 'System'];
 
@@ -37,7 +38,8 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
       }
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _checkPermission();
       if (mounted) {
         OnboardingOverlay.show(
           context: context,
@@ -46,6 +48,83 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         );
       }
     });
+  }
+
+  Future<void> _checkPermission() async {
+    try {
+      final granted = await ref.read(fcmServiceProvider).isPermissionGranted();
+      if (mounted) {
+        setState(() {
+          _isNotificationPermissionGranted = granted;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Widget _buildPermissionBanner() {
+    if (_isNotificationPermissionGranted) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.notifications_off_rounded, color: Color(0xFFF59E0B), size: 24),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Notifications are Disabled',
+                  style: GoogleFonts.sora(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Enable to receive class, task, and routine reminders.',
+                  style: GoogleFonts.sora(
+                    color: Colors.white70,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          ElevatedButton(
+            onPressed: () async {
+              final granted = await ref.read(fcmServiceProvider).requestPermissionAndRegister();
+              if (mounted) {
+                setState(() {
+                  _isNotificationPermissionGranted = granted;
+                });
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFF59E0B),
+              foregroundColor: Colors.black,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              minimumSize: const Size(60, 32),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: Text(
+              'Enable',
+              style: GoogleFonts.sora(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -104,6 +183,30 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         actions: [
+          IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.primaryCyan.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.sync_rounded, color: AppColors.primaryCyan, size: 20),
+            ),
+            tooltip: 'Sync Notifications',
+            onPressed: () async {
+              await ref.read(fcmServiceProvider).syncToken();
+              await _checkPermission();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Notification service synced!', style: GoogleFonts.sora()),
+                    backgroundColor: const Color(0xFF10B981),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+          ),
           IconButton(
             icon: Container(
               padding: const EdgeInsets.all(6),
@@ -189,89 +292,97 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
           ),
         ),
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          ref.invalidate(userNotificationsProvider);
-        },
-        color: AppColors.primaryCyan,
-        backgroundColor: AppColors.surfaceNavyBlue,
-        child: notificationsAsync.when(
-          data: (notifications) {
-            // Apply filter
-            final filtered = notifications.where((n) {
-              if (_selectedFilter == 'Unread') return !n.isRead;
-              if (_selectedFilter == 'Schedule') return n.type.toLowerCase() == 'schedule';
-              if (_selectedFilter == 'Tasks') return n.type.toLowerCase() == 'task';
-              if (_selectedFilter == 'System') {
-                final t = n.type.toLowerCase();
-                return t == 'system' || t == 'update';
-              }
-              return true;
-            }).toList();
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildPermissionBanner(),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () async {
+                ref.invalidate(userNotificationsProvider);
+              },
+              color: AppColors.primaryCyan,
+              backgroundColor: AppColors.surfaceNavyBlue,
+              child: notificationsAsync.when(
+                data: (notifications) {
+                  // Apply filter
+                  final filtered = notifications.where((n) {
+                    if (_selectedFilter == 'Unread') return !n.isRead;
+                    if (_selectedFilter == 'Schedule') return n.type.toLowerCase() == 'schedule';
+                    if (_selectedFilter == 'Tasks') return n.type.toLowerCase() == 'task';
+                    if (_selectedFilter == 'System') {
+                      final t = n.type.toLowerCase();
+                      return t == 'system' || t == 'update';
+                    }
+                    return true;
+                  }).toList();
 
-            if (filtered.isEmpty) {
-              return SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: SizedBox(
-                  height: MediaQuery.of(context).size.height * 0.65,
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 68,
-                          height: 68,
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryCyan.withValues(alpha: 0.1),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.primaryCyan.withValues(alpha: 0.25), width: 1.5),
+                  if (filtered.isEmpty) {
+                    return SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: SizedBox(
+                        height: MediaQuery.of(context).size.height * 0.65,
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 68,
+                                height: 68,
+                                decoration: BoxDecoration(
+                                  color: AppColors.primaryCyan.withValues(alpha: 0.1),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: AppColors.primaryCyan.withValues(alpha: 0.25), width: 1.5),
+                                ),
+                                child: const Icon(Icons.notifications_off_outlined, size: 32, color: AppColors.primaryCyan),
+                              ),
+                              const SizedBox(height: 18),
+                              Text(
+                                _selectedFilter == 'All' ? 'No Notifications' : 'No $_selectedFilter Notifications',
+                                style: GoogleFonts.sora(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'You are all caught up! Important alerts will appear here.',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.sora(
+                                  color: AppColors.secondaryText,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
                           ),
-                          child: const Icon(Icons.notifications_off_outlined, size: 32, color: AppColors.primaryCyan),
                         ),
-                        const SizedBox(height: 18),
-                        Text(
-                          _selectedFilter == 'All' ? 'No Notifications' : 'No $_selectedFilter Notifications',
-                          style: GoogleFonts.sora(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'You are all caught up! Important alerts will appear here.',
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.sora(
-                            color: AppColors.secondaryText,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    );
+                  }
+
+                  return ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                    itemCount: filtered.length,
+                    separatorBuilder: (context, index) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final notif = filtered[index];
+                      return _buildNotificationCard(context, ref, notif);
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primaryCyan)),
+                error: (err, stack) => Center(
+                  child: Text(
+                    'Failed to load notifications: $err',
+                    style: GoogleFonts.sora(color: Colors.redAccent),
                   ),
                 ),
-              );
-            }
-
-            return ListView.separated(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-              itemCount: filtered.length,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final notif = filtered[index];
-                return _buildNotificationCard(context, ref, notif);
-              },
-            );
-          },
-          loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primaryCyan)),
-          error: (err, stack) => Center(
-            child: Text(
-              'Failed to load notifications: $err',
-              style: GoogleFonts.sora(color: Colors.redAccent),
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

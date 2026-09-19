@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'glass_kit.dart';
 
@@ -18,7 +17,7 @@ class AccessRestrictedScreen extends StatelessWidget {
               opacity: 0.08,
               blur: 20,
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
-              borderColor: Colors.redAccent.withOpacity(0.15),
+              borderColor: Colors.redAccent.withValues(alpha: 0.15),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -26,15 +25,15 @@ class AccessRestrictedScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.redAccent.withOpacity(0.1),
+                      color: Colors.redAccent.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: Colors.redAccent.withOpacity(0.2),
+                        color: Colors.redAccent.withValues(alpha: 0.2),
                         width: 1.5,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.redAccent.withOpacity(0.1),
+                          color: Colors.redAccent.withValues(alpha: 0.1),
                           blurRadius: 20,
                           spreadRadius: 2,
                         ),
@@ -67,7 +66,7 @@ class AccessRestrictedScreen extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 13,
-                      color: Colors.white.withOpacity(0.6),
+                      color: Colors.white.withValues(alpha: 0.6),
                       height: 1.5,
                     ),
                   ),
@@ -77,9 +76,9 @@ class AccessRestrictedScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.02),
+                      color: Colors.white.withValues(alpha: 0.02),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withOpacity(0.04)),
+                      border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -111,14 +110,14 @@ class AccessRestrictedScreen extends StatelessWidget {
                       Icon(
                         Icons.info_outline_rounded,
                         size: 14,
-                        color: Colors.white.withOpacity(0.4),
+                        color: Colors.white.withValues(alpha: 0.4),
                       ),
                       const SizedBox(width: 6),
                       Text(
                         "Please open this site from an Apple device.",
                         style: TextStyle(
                           fontSize: 11,
-                          color: Colors.white.withOpacity(0.4),
+                          color: Colors.white.withValues(alpha: 0.4),
                         ),
                       ),
                     ],
