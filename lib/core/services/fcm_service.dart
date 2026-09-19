@@ -287,10 +287,9 @@ class FCMService {
         await _supabase.from('fcm_tokens').upsert({
           'user_id': user.id,
           'token': token,
-          'platform': kIsWeb ? 'web' : defaultTargetPlatform.name.toLowerCase(),
           'updated_at': DateTime.now().toIso8601String(),
         }, onConflict: 'token');
-        debugPrint("[FCM] Token saved successfully for user ${user.id} on ${kIsWeb ? 'web' : defaultTargetPlatform.name}");
+        debugPrint("[FCM] Token saved successfully for user ${user.id}");
         return true;
       } else {
         debugPrint("[FCM] No current user signed in. Token will sync upon session restoration.");
