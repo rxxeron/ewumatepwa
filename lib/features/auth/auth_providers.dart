@@ -92,6 +92,9 @@ final requiresGradeEntryProvider = StreamProvider<bool>((ref) async* {
   final cacheService = ref.read(cacheServiceProvider);
   final client = Supabase.instance.client;
 
+  // Watch the provider future before yielding anything (fixes Riverpod StateError)
+  final profileFuture = ref.watch(profileProvider.future);
+
   // 1. Emit cached decision instantly (Frame 1)
   final cached = cacheService.getMapData('profile_box', '${user.id}_requires_grade_entry');
   if (cached != null) {
@@ -102,7 +105,7 @@ final requiresGradeEntryProvider = StreamProvider<bool>((ref) async* {
 
   // 2. Fetch fresh decision online
   try {
-    final profile = await ref.watch(profileProvider.future);
+    final profile = await profileFuture;
     if (profile == null) {
       yield false;
       return;

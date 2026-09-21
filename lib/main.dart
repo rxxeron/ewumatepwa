@@ -15,6 +15,34 @@ import 'core/config/url_strategy_config.dart'
 import 'core/theme/app_theme.dart';
 import 'core/repositories/auth_repository.dart';
 
+Future<void> _bootloader(CacheService cache) async {
+  // 1. Cache Layer
+  try { 
+    await cache.init(); 
+  } catch (e) { 
+    if (kDebugMode) debugPrint('[Boot] Cache init error: $e'); 
+  }
+  
+  // 2. Firebase Layer (Gracefully skipped on Web to prevent JS Object crashes)
+  if (!kIsWeb) {
+    try {
+      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[Boot] Firebase init error: $e');
+    }
+  } else {
+    if (kDebugMode) debugPrint('[Boot] Web detected: Bypassing Firebase init.');
+  }
+
+  // 3. Supabase Layer
+  try {
+    await SupabaseConfig.initialize();
+  } catch (e) {
+    if (kDebugMode) debugPrint('[Boot] Supabase init error: $e');
+  }
+}
+
 void main() async {
   configureUrlStrategy();
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,37 +78,8 @@ void main() async {
     );
   };
 
-  // Initialize Cache Service (Hive), Firebase, and Supabase in parallel
   final cacheService = CacheService();
-  
-  try {
-    await Future.wait([
-      cacheService.init(),
-      () async {
-        try {
-          await Firebase.initializeApp(
-            options: DefaultFirebaseOptions.currentPlatform,
-          );
-        } catch (e) {
-          if (kDebugMode) debugPrint('Firebase init error: $e');
-        }
-      }(),
-      SupabaseConfig.initialize().catchError((e) {
-        if (kDebugMode) debugPrint('Supabase init error: $e');
-      }),
-    ]);
-  } catch (e) {
-    if (kDebugMode) debugPrint('Parallel initialization error: $e');
-  }
-
-  // Register top-level FCM background message handler on mobile platforms
-  if (!kIsWeb) {
-    try {
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    } catch (e) {
-      if (kDebugMode) debugPrint('Firebase background handler registration error: $e');
-    }
-  }
+  await _bootloader(cacheService);
 
   runApp(
     ProviderScope(
