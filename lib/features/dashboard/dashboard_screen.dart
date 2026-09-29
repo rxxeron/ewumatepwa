@@ -20,6 +20,7 @@ import '../tasks/presentation/widgets/add_task_bottom_sheet.dart';
 import 'controllers/dashboard_controller.dart';
 import 'dashboard_logic.dart';
 import 'widgets/dashboard_banner_tray.dart';
+import 'widgets/pre_course_assessment_dialog.dart';
 import 'widgets/dashboard_exam_timeline.dart';
 import 'widgets/dashboard_header.dart';
 import 'widgets/dashboard_overdue_checkpoint.dart';
@@ -59,6 +60,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
+        PreCourseAssessmentDialog.checkAndShow(context);
         FacultyReviewsSpotlightDialog.checkAndShow(context);
       }
     });
@@ -325,6 +327,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               showAdvisingBanner: state.showAdvisingBanner,
                               onAdvisingTap: () => context.push('/advising'),
                               semConfig: state.semConfig,
+                              holidayTitle: (state.lastValidScheduleData != null && state.lastValidScheduleData!['status'] == 'holiday')
+                                  ? state.lastValidScheduleData!['reason']?.toString()
+                                  : null,
                             ),
                           ),
                           FadeInSlide(
