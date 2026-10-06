@@ -5,22 +5,33 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../../core/config/supabase_config.dart';
 import '../../core/utils/course_utils.dart';
 import '../../core/services/cache_service.dart';
+import '../../core/services/redis_service.dart';
 
 final dashboardRepositoryProvider = Provider<DashboardRepository>((ref) {
   final cache = ref.watch(cacheServiceProvider);
-  return DashboardRepository(supabase: Supabase.instance.client, cache: cache);
+  final redis = ref.watch(redisServiceProvider);
+  return DashboardRepository(
+    supabase: Supabase.instance.client,
+    cache: cache,
+    redis: redis,
+  );
 });
 
 class DashboardRepository {
   final SupabaseClient _supabase;
   final CacheService? _cache;
+  final RedisService? _redis;
 
-  DashboardRepository({SupabaseClient? supabase, CacheService? cache})
-    : _supabase = supabase ?? Supabase.instance.client,
-      _cache = cache;
+  DashboardRepository({
+    SupabaseClient? supabase,
+    CacheService? cache,
+    RedisService? redis,
+  })  : _supabase = supabase ?? Supabase.instance.client,
+        _cache = cache,
+        _redis = redis;
 
   /// The New Simplified Dashboard Fetch
   /// 1. Weekly Grid (user_semester_states)
@@ -43,13 +54,16 @@ class DashboardRepository {
 
     // Determine student track (PHRM/LAW vs Standard)
     final programName = track?.toUpperCase() ?? '';
-    final bool isBiSemester = programName.contains('PHRM') || programName.contains('LAW') || programName.contains('LLB');
+    final bool isBiSemester = programName.contains('PHRM') ||
+        programName.contains('LAW') ||
+        programName.contains('LLB') ||
+        programName.contains('BI');
 
     // Smart Invalidation Cache Check
     final cache = _cache;
     if (cache != null) {
       final safeSem = CourseUtils.cleanSemester(semesterCode);
-      final cached = cache.getCachedDashboardSchedule(effectiveUserId, safeSem);
+      final cached = cache.getCachedDashboardSchedule(effectiveUserId, safeSem, dateStr: dateStr);
       if (cached != null) {
         final cacheDateStr = cached['dateStr'] as String?;
         if (cacheDateStr == dateStr) {
@@ -108,18 +122,40 @@ class DashboardRepository {
             .eq('user_id', effectiveUserId)
             .eq('date', dateStr),
         // [2] Standard (Tri) events for dateStr
-        _supabase
-            .from(standardTable)
-            .select()
-            .eq('event_date', dateStr)
-            .catchError((_) => <dynamic>[]),
+        Future<List<dynamic>>(() async {
+          final cleanSem = CourseUtils.cleanSemester(semesterCode).toLowerCase();
+          if (_redis != null) {
+            try {
+              final cachedCal = await _redis!.getList('global:calendar:$cleanSem');
+              if (cachedCal != null && cachedCal.isNotEmpty) {
+                return cachedCal.where((e) => e is Map && e['event_date'] == dateStr).toList();
+              }
+            } catch (_) {}
+          }
+          try {
+            return await _supabase.from(standardTable).select().eq('event_date', dateStr);
+          } catch (_) {
+            return <dynamic>[];
+          }
+        }),
         // [3] Professional (Bi) events for dateStr
         (phrmTable != null)
-            ? _supabase
-                .from(phrmTable)
-                .select()
-                .eq('event_date', dateStr)
-                .catchError((_) => <dynamic>[])
+            ? Future<List<dynamic>>(() async {
+                final cleanSem = CourseUtils.cleanSemester(semesterCode).toLowerCase();
+                if (_redis != null) {
+                  try {
+                    final cachedCal = await _redis!.getList('global:calendar:$cleanSem:phrm_llb');
+                    if (cachedCal != null && cachedCal.isNotEmpty) {
+                      return cachedCal.where((e) => e is Map && e['event_date'] == dateStr).toList();
+                    }
+                  } catch (_) {}
+                }
+                try {
+                  return await _supabase.from(phrmTable).select().eq('event_date', dateStr);
+                } catch (_) {
+                  return <dynamic>[];
+                }
+              })
             : Future.value(<dynamic>[]),
         // [4] Tasks
         _supabase
@@ -189,13 +225,13 @@ class DashboardRepository {
           try {
             // Manual HTTP call to bypass the automatic JWT/Authorization header injection
             // which was triggering 401 Invalid JWT errors.
-            final functionsUrl = '${dotenv.env['SUPABASE_URL']!}/functions/v1';
+            final functionsUrl = '${AppConfig.getSupabaseUrl}/functions/v1';
             final uri = Uri.parse('$functionsUrl/sync-schedule');
             await http.post(
               uri,
               headers: {
                 'Content-Type': 'application/json',
-                'apikey': dotenv.env['SUPABASE_ANON_KEY']!,
+                'apikey': AppConfig.getSupabaseAnonKey,
               },
               body: jsonEncode({
                 'user_id': effectiveUserId,
@@ -299,7 +335,7 @@ class DashboardRepository {
         if (cache != null) {
           final cachePayload = {...payload, 'date': date.toIso8601String()};
           final safeSem = CourseUtils.cleanSemester(semesterCode);
-          cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload);
+          cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload, dateStr: dateStr);
         }
 
         return payload;
@@ -383,7 +419,7 @@ class DashboardRepository {
       if (cache != null && weeklyGrid.isNotEmpty) {
         final cachePayload = {...payload, 'date': date.toIso8601String()};
         final safeSem = CourseUtils.cleanSemester(semesterCode);
-        cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload);
+        cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload, dateStr: dateStr);
       }
 
       return payload;
@@ -408,13 +444,13 @@ class DashboardRepository {
   Future<void> syncWeeklySchedule(String userId) async {
     try {
       debugPrint('[Dashboard] Proactively triggering sync-schedule (No-JWT) for: $userId');
-      final functionsUrl = '${dotenv.env['SUPABASE_URL']!}/functions/v1';
+      final functionsUrl = '${AppConfig.getSupabaseUrl}/functions/v1';
       final uri = Uri.parse('$functionsUrl/sync-schedule');
       await http.post(
         uri,
         headers: {
           'Content-Type': 'application/json',
-          'apikey': dotenv.env['SUPABASE_ANON_KEY']!,
+          'apikey': AppConfig.getSupabaseAnonKey,
         },
         body: jsonEncode({
           'user_id': userId,
@@ -690,13 +726,13 @@ class DashboardRepository {
 
       if (weeklyGrid.isEmpty) {
         try {
-          final functionsUrl = '${dotenv.env['SUPABASE_URL']!}/functions/v1';
+          final functionsUrl = '${AppConfig.getSupabaseUrl}/functions/v1';
           final uri = Uri.parse('$functionsUrl/sync-schedule');
           await http.post(
             uri,
             headers: {
               'Content-Type': 'application/json',
-              'apikey': dotenv.env['SUPABASE_ANON_KEY']!,
+              'apikey': AppConfig.getSupabaseAnonKey,
             },
             body: jsonEncode({
               'user_id': user.id,
