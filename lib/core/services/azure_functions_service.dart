@@ -1,14 +1,15 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../config/supabase_config.dart';
 
 class AzureFunctionsService {
   final String _baseUrl;
 
   AzureFunctionsService()
-      : _baseUrl = dotenv.env['AZURE_FUNCTION_URL'] ?? 'https://ewumate-parser.azurewebsites.net';
+      : _baseUrl = AppConfig.getAzureFunctionUrl;
 
   Future<Map<String, dynamic>> _postRequest(
       String endpoint, Map<String, dynamic> body) async {

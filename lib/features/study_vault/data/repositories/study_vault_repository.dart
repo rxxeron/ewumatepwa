@@ -47,7 +47,7 @@ class StudyVaultRepository {
       query = query.or('file_name.ilike.%$q%,course_code.ilike.%$q%,faculty_initial.ilike.%$q%');
     }
 
-    final data = await query.order('created_at', ascending: false);
+    final data = await query.order('created_at', ascending: false).limit(100);
     return data.map((e) => StudyMaterial.fromJson(e)).toList();
   }
 

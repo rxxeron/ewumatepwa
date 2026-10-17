@@ -116,9 +116,9 @@ class OnboardingRepository {
     // 2. If program details changed, clear previous course history/enrollments for a fresh start
     if (hasChanged) {
       await Future.wait([
-        _client.from('completed_courses').delete().eq('user_id', user.id),
-        _client.from('enrollments').delete().eq('user_id', user.id),
-        _client.from('semester_course_marks').delete().eq('user_id', user.id),
+        _client.from('completed_courses').delete().match({'user_id': user.id}),
+        _client.from('enrollments').delete().match({'user_id': user.id}),
+        _client.from('semester_course_marks').delete().match({'user_id': user.id}),
       ]);
     }
 
@@ -129,8 +129,6 @@ class OnboardingRepository {
       'program_name': programName,
       'department_name': department,
       'admitted_semester': admittedSemester, // Keep original for display but comparison is clean
-      'semester_type': semType,
-      'track': semType,
       'onboarding_status': 'course_history',
     };
 
@@ -170,12 +168,8 @@ class OnboardingRepository {
         .eq('id', user.id)
         .maybeSingle();
     
-    final rawTrack = profile?['track'] ?? profile?['semester_type'] ?? 'tri_semester';
-    String track = rawTrack.toString().toLowerCase();
-    
-    // NORMALIZE: Ensure track matches DB Enum ('tri' -> 'tri_semester')
-    if (track == 'tri') track = 'tri_semester';
-    if (track == 'bi') track = 'bi_semester';
+    final rawTrack = profile?['track'] ?? profile?['semester_type'];
+    final track = CourseUtils.normalizeTrack(rawTrack?.toString());
 
     // 2. Get the active semester configuration for that track
     final activeSem = await _client
@@ -384,7 +378,7 @@ class OnboardingRepository {
   }) async {
     final user = _client.auth.currentUser;
     if (user == null) return;
-    
+
     final cleanRunningSemester = CourseUtils.cleanSemester(runningSemester);
     
     // 1. Prepare data for completed_courses and identify diffs
@@ -520,7 +514,10 @@ class OnboardingRepository {
         }
         if (enrollmentRows.isNotEmpty) {
           try {
-            await _client.from('enrollments').insert(enrollmentRows);
+            await _client.from('enrollments').upsert(
+              enrollmentRows,
+              onConflict: 'user_id,semester_code,course_code',
+            );
           } catch (e) {
             throw Exception("Failed to save enrollments: $e");
           }

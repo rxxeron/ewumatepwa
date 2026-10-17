@@ -85,10 +85,14 @@ final paginatedCoursesProvider = AsyncNotifierProvider<PaginatedCoursesNotifier,
 );
 
 final courseSearchResultProvider = FutureProvider<List<CourseMetadata>>((ref) async {
-  final query = ref.watch(courseSearchQueryProvider);
+  final query = ref.watch(courseSearchQueryProvider).trim();
   final repo = ref.watch(courseRepositoryProvider);
   
   if (query.isEmpty) return [];
+  final isValid = query.length >= 3 || 
+      (query.length == 2 && ['CE', 'CS'].contains(query.toUpperCase()));
+  if (!isValid) return [];
+
   return repo.searchCourses(query);
 });
 
@@ -313,7 +317,7 @@ final userEnrollmentDetailsProvider = FutureProvider<List<Map<String, dynamic>>>
   
   var query = supabase
       .from('enrollments')
-      .select()
+      .select('id, user_id, semester_code, course_code, section, section_id, time, room, status, faculty_initial')
       .eq('user_id', user.id)
       .eq('semester_code', targetSem);
 

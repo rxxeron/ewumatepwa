@@ -13,6 +13,12 @@ external JSBoolean _isPWAStandalone();
 @JS('window.isIOSDevice')
 external JSBoolean _isIOSDevice();
 
+@JS('window.isRxxeronBypassed')
+external JSBoolean _isRxxeronBypassed();
+
+@JS('window.setRxxeronBypassed')
+external void _setRxxeronBypassed();
+
 @JS('window.triggerPWAInstall')
 external JSPromise<JSBoolean> _triggerPWAInstall();
 
@@ -26,22 +32,29 @@ class PwaState {
   final bool isInstallable;
   final bool isStandalone;
   final bool isIOS;
+  final bool isBypassed;
 
   PwaState({
     required this.isInstallable,
     required this.isStandalone,
     required this.isIOS,
+    this.isBypassed = false,
   });
+
+  /// Access is granted if on iOS or if unlocked via rxxeron=true bypass
+  bool get hasAccess => isIOS || isBypassed;
 
   PwaState copyWith({
     bool? isInstallable,
     bool? isStandalone,
     bool? isIOS,
+    bool? isBypassed,
   }) {
     return PwaState(
       isInstallable: isInstallable ?? this.isInstallable,
       isStandalone: isStandalone ?? this.isStandalone,
       isIOS: isIOS ?? this.isIOS,
+      isBypassed: isBypassed ?? this.isBypassed,
     );
   }
 }
@@ -51,7 +64,7 @@ class PwaController extends _$PwaController {
   @override
   PwaState build() {
     if (!kIsWeb) {
-      return PwaState(isInstallable: false, isStandalone: false, isIOS: false);
+      return PwaState(isInstallable: false, isStandalone: false, isIOS: true, isBypassed: true);
     }
     
     // Wire up callbacks
@@ -69,6 +82,7 @@ class PwaController extends _$PwaController {
       isInstallable: isInstallable(),
       isStandalone: isStandalone(),
       isIOS: isIOS(),
+      isBypassed: isBypassed(),
     );
   }
 
@@ -91,12 +105,33 @@ class PwaController extends _$PwaController {
   }
 
   bool isIOS() {
-    if (!kIsWeb) return false;
+    if (!kIsWeb) return true;
     try {
       return _isIOSDevice().toDart;
     } catch (_) {
       return false;
     }
+  }
+
+  bool isBypassed() {
+    if (!kIsWeb) return true;
+    try {
+      if (Uri.base.queryParameters['rxxeron'] == 'true') {
+        _setRxxeronBypassed();
+        return true;
+      }
+      return _isRxxeronBypassed().toDart;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void setBypassed() {
+    if (!kIsWeb) return;
+    try {
+      _setRxxeronBypassed();
+      state = state.copyWith(isBypassed: true);
+    } catch (_) {}
   }
 
   Future<bool> installApp() async {

@@ -174,8 +174,7 @@ class DashboardController {
 
     try {
       final profile = ref.read(profileProvider).value;
-      final userTrack = (profile?.track ?? '').toLowerCase();
-      final bool isBiSemester = userTrack.contains('bi') || userTrack.contains('phrm') || userTrack.contains('law') || userTrack.contains('llb');
+      final bool isBiSemester = CourseUtils.normalizeTrack(profile?.track) == 'bi_semester';
 
       final results = await Future.wait<dynamic>([
         supabase
@@ -210,10 +209,15 @@ class DashboardController {
       final exceptions = results[3] as List;
       final progressData = results[4] as List<Map<String, dynamic>>;
 
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
       DateTime? startDate = DateTime.tryParse(activeSem?['classes_start_date']?.toString() ?? '');
       DateTime? endDate = DateTime.tryParse(activeSem?['classes_end_date']?.toString() ?? '');
-      startDate ??= DateTime.now().subtract(const Duration(days: 45));
-      endDate ??= DateTime.now().add(const Duration(days: 45));
+      final lookbackLimit = today.subtract(const Duration(days: 14));
+      if (startDate == null || startDate.isBefore(lookbackLimit)) {
+        startDate = lookbackLimit;
+      }
+      endDate ??= today.add(const Duration(days: 14));
 
       final Set<String> holidayDates = {};
       for (final ev in holidays) {
@@ -253,8 +257,6 @@ class DashboardController {
         'Sunday': DateTime.sunday,
       };
 
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
       final DateTime endLimit = endDate.isAfter(today) ? today : endDate;
 
       final List<Map<String, dynamic>> pendingItems = [];
@@ -421,7 +423,7 @@ class DashboardController {
       await ref.read(semesterProgressRepositoryProvider).saveCourseMarks(currentUser.id, state.semesterCode, updatedMap);
 
       state.pendingAttendanceItems.removeWhere((i) =>
-          i['course_code'] == item['course_code'] &&
+          CourseUtils.areEquivalent(i['course_code'], item['course_code']) &&
           i['dateStr'] == dateStr &&
           i['session_type'] == sessionType);
       state.isSavingAttendance = false;
@@ -536,34 +538,38 @@ class DashboardController {
       orElse: () => <String, dynamic>{},
     );
 
-    if (courseMap.isNotEmpty) {
-      final updatedMap = Map<String, dynamic>.from(courseMap);
-      final marksData = Map<String, dynamic>.from(updatedMap['marks_data'] ?? {});
-      final attendance = Map<String, dynamic>.from(marksData['attendance'] ?? {});
-      final dates = Map<String, dynamic>.from(attendance['dates'] ?? {});
-      final types = Map<String, dynamic>.from(attendance['types'] ?? {});
+    final updatedMap = courseMap.isNotEmpty
+        ? Map<String, dynamic>.from(courseMap)
+        : <String, dynamic>{
+            'course_code': courseCode,
+            'marks_data': <String, dynamic>{},
+          };
 
-      final key = '${dateStr}_$sessionType';
-      dates[key] = 'joined';
-      types[key] = sessionType;
-      dates[dateStr] = 'joined';
-      types[dateStr] = sessionType;
+    final marksData = Map<String, dynamic>.from(updatedMap['marks_data'] ?? {});
+    final attendance = Map<String, dynamic>.from(marksData['attendance'] ?? {});
+    final dates = Map<String, dynamic>.from(attendance['dates'] ?? {});
+    final types = Map<String, dynamic>.from(attendance['types'] ?? {});
 
-      attendance['dates'] = dates;
-      attendance['types'] = types;
-      marksData['attendance'] = attendance;
-      updatedMap['marks_data'] = marksData;
+    final key = '${dateStr}_$sessionType';
+    dates[key] = 'joined';
+    types[key] = sessionType;
+    dates[dateStr] = 'joined';
+    types[dateStr] = sessionType;
 
-      await ref.read(semesterProgressRepositoryProvider).saveCourseMarks(currentUser.id, state.semesterCode, updatedMap);
+    attendance['dates'] = dates;
+    attendance['types'] = types;
+    marksData['attendance'] = attendance;
+    updatedMap['marks_data'] = marksData;
 
-      state.pendingAttendanceItems.removeWhere((i) =>
-          i['course_code'] == courseCode &&
-          i['dateStr'] == dateStr &&
-          i['session_type'] == sessionType);
-      onStateChanged();
+    await ref.read(semesterProgressRepositoryProvider).saveCourseMarks(currentUser.id, state.semesterCode, updatedMap);
 
-      ref.invalidate(semesterProgressDataProvider(state.semesterCode));
-    }
+    state.pendingAttendanceItems.removeWhere((i) =>
+        CourseUtils.areEquivalent(i['course_code'], courseCode) &&
+        i['dateStr'] == dateStr &&
+        i['session_type'] == sessionType);
+    onStateChanged();
+
+    ref.invalidate(semesterProgressDataProvider(state.semesterCode));
   }
 
   /// Synchronizes today's next class and schedule to HomeWidget

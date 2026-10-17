@@ -245,6 +245,7 @@ class _UploadStudyMaterialScreenState extends ConsumerState<UploadStudyMaterialS
           labelKey: 'code',
           subtitleKey: 'name',
           searchPlaceholder: 'Search course code or title...',
+          showCustomValue: false,
           customValueLabel: 'Add this custom course code to details',
           onSelected: (code, name) {
             setState(() {

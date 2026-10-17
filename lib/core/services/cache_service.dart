@@ -12,6 +12,7 @@ class CacheService {
   static const String _syncQueueBox = 'sync_queue_box';
   static const String _semesterProgressBox = 'semester_progress_box';
   static const String _notificationsBox = 'notifications_box';
+  static const String _routineCacheBox = 'routine_cache_box';
 
   Future<void> init() async {
     try {
@@ -23,6 +24,7 @@ class CacheService {
       await Hive.openBox(_syncQueueBox);
       await Hive.openBox(_semesterProgressBox);
       await Hive.openBox(_notificationsBox);
+      await Hive.openBox(_routineCacheBox);
       await Hive.openBox(_authBox);
       await Hive.openBox('faculty');
       if (kDebugMode) debugPrint('[CacheService] Successfully initialized Hive boxes.');
@@ -126,19 +128,28 @@ class CacheService {
   }
 
   // --- Offline Sync Queue ---
+  Future<void> _enqueueLock = Future.value();
+
   Future<void> enqueueMutation(String userId, Map<String, dynamic> mutation) async {
-    final box = Hive.box(_syncQueueBox);
-    final key = '${userId}_queue';
-    final existingDataStr = box.get(key) as String?;
-    
-    List<dynamic> queue = [];
-    if (existingDataStr != null) {
-      queue = jsonDecode(existingDataStr) as List<dynamic>;
-    }
-    
-    queue.add(mutation);
-    await box.put(key, jsonEncode(queue));
-    if (kDebugMode) debugPrint('[CacheService] Enqueued mutation: ${mutation['action']}');
+    _enqueueLock = _enqueueLock.then((_) async {
+      final box = Hive.box(_syncQueueBox);
+      final key = '${userId}_queue';
+      final existingDataStr = box.get(key) as String?;
+      
+      List<dynamic> queue = [];
+      if (existingDataStr != null) {
+        try {
+          queue = jsonDecode(existingDataStr) as List<dynamic>;
+        } catch (_) {}
+      }
+      
+      queue.add(mutation);
+      await box.put(key, jsonEncode(queue));
+      if (kDebugMode) debugPrint('[CacheService] Enqueued mutation: ${mutation['action']}');
+    }).catchError((e) {
+      if (kDebugMode) debugPrint('[CacheService] Enqueue error: $e');
+    });
+    return _enqueueLock;
   }
 
   List<Map<String, dynamic>> getSyncQueue(String userId) {
