@@ -14,22 +14,6 @@ class IosOnlyGateScreen extends ConsumerStatefulWidget {
 }
 
 class _IosOnlyGateScreenState extends ConsumerState<IosOnlyGateScreen> {
-  final TextEditingController _passcodeController = TextEditingController();
-  bool _showSecretInput = false;
-
-  void _checkBypass(String value) {
-    if (value.trim().toLowerCase() == 'rxxeron') {
-      ref.read(pwaControllerProvider.notifier).setBypassed();
-      context.go('/');
-    }
-  }
-
-  @override
-  void dispose() {
-    _passcodeController.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final pwaState = ref.watch(pwaControllerProvider);
@@ -211,56 +195,6 @@ class _IosOnlyGateScreenState extends ConsumerState<IosOnlyGateScreen> {
                 ),
                 const SizedBox(height: 28),
 
-                // 6. Discrete Secret Developer / Tester Bypass
-                if (!_showSecretInput)
-                  TextButton(
-                    onPressed: () {
-                      setState(() => _showSecretInput = true);
-                    },
-                    child: Text(
-                      'Developer / Beta Access',
-                      style: GoogleFonts.sora(
-                        fontSize: 12,
-                        color: Colors.white.withValues(alpha: 0.4),
-                        decoration: TextDecoration.underline,
-                        decorationColor: Colors.white.withValues(alpha: 0.25),
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.1),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _passcodeController,
-                            style: GoogleFonts.sora(color: Colors.white, fontSize: 13),
-                            obscureText: true,
-                            decoration: InputDecoration(
-                              hintText: 'Enter developer bypass key...',
-                              hintStyle: GoogleFonts.sora(color: Colors.white38, fontSize: 12),
-                              border: InputBorder.none,
-                              isDense: true,
-                            ),
-                            onSubmitted: _checkBypass,
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.arrow_forward_rounded, color: Color(0xFF00E5FF), size: 20),
-                          onPressed: () => _checkBypass(_passcodeController.text),
-                        ),
-                      ],
-                    ),
-                  ),
               ],
             ),
           ),
