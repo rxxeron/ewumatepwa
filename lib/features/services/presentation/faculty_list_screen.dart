@@ -208,7 +208,7 @@ class _FacultyListScreenState extends ConsumerState<FacultyListScreen> {
               itemCount: semesterList.length,
               itemBuilder: (context, index) {
                 final semester = semesterList[index];
-                final items = grouped[semester]!;
+                final items = grouped[semester] ?? [];
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
