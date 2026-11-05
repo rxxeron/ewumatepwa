@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:home_widget/home_widget.dart';
+
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -18,6 +18,7 @@ import '../../auth/auth_providers.dart';
 import '../../semester_progress/semester_progress_repository.dart';
 import '../dashboard_logic.dart';
 import '../dashboard_repository.dart';
+import '../exception_repository.dart';
 
 class DashboardState {
   Map<String, dynamic>? lastValidScheduleData;
@@ -150,13 +151,13 @@ class DashboardController {
         return <String, dynamic>{};
       }).where((m) => m.isNotEmpty).toList();
 
-      // Google Play In-App Update is handled automatically on launch via AppUpdateService
+      // PWA service worker updates are handled via updateListenerProvider
       state.showUpdateBanner = false;
 
       onStateChanged();
 
       // Background parallel routines
-      updateHomeWidget(scheduleData);
+
       loadPendingAttendance(ref: ref);
       checkAdvisingBanner(nextSemesterCode, scheduleData['advising_end']);
       checkPortalSyncGuide();
@@ -175,44 +176,85 @@ class DashboardController {
     try {
       final profile = ref.read(profileProvider).value;
       final bool isBiSemester = CourseUtils.normalizeTrack(profile?.track) == 'bi_semester';
+      final cacheService = ref.read(cacheServiceProvider);
+
+      // Fast check: retrieve weeklyGrid and semConfig already in memory / cache
+      Map<String, dynamic> grid = {};
+      final cachedSchedule = state.lastValidScheduleData;
+      if (cachedSchedule != null && cachedSchedule['weekly_grid'] is Map<String, dynamic>) {
+        grid = cachedSchedule['weekly_grid'] as Map<String, dynamic>;
+      }
+
+      // If weeklyGrid was not preserved in scheduleData, check user_semester_states
+      final Future<dynamic> gridFuture = grid.isNotEmpty
+          ? Future.value({'weekly_grid_cache': grid})
+          : supabase
+              .from('user_semester_states')
+              .select('weekly_grid_cache')
+              .eq('user_id', currentUser.id)
+              .eq('semester_code', state.semesterCode)
+              .maybeSingle();
+
+      // Read calendar holidays with local CacheService or Redis fallback
+      final cleanSem = CourseUtils.cleanSemester(state.semesterCode).toLowerCase();
+      final calendarTable = CourseUtils.semesterTable(
+        'calendar',
+        state.semesterCode,
+        cycleType: isBiSemester ? 'bi_semester' : 'tri_semester',
+      );
+
+      final Future<dynamic> holidaysFuture = Future<dynamic>(() async {
+        // Try Hive cache first
+        final cachedHolidays = cacheService.getMapData('dashboard_box', '${cleanSem}_${isBiSemester ? "bi" : "tri"}_holidays');
+        if (cachedHolidays != null && cachedHolidays['events'] is List) {
+          final cachedAtStr = cachedHolidays['cached_at'] as String?;
+          final cachedAt = cachedAtStr != null ? DateTime.tryParse(cachedAtStr) : null;
+          if (cachedAt != null && DateTime.now().difference(cachedAt).inHours < 4) {
+            return cachedHolidays['events'] as List;
+          }
+        }
+        try {
+          final res = await supabase.from(calendarTable).select().order('event_date');
+          if (res.isNotEmpty) {
+            cacheService.setMapData('dashboard_box', '${cleanSem}_${isBiSemester ? "bi" : "tri"}_holidays', {
+              'events': res,
+              'cached_at': DateTime.now().toIso8601String(),
+            });
+          }
+          return res;
+        } catch (_) {
+          return (cachedHolidays?['events'] as List?) ?? <dynamic>[];
+        }
+      });
 
       final results = await Future.wait<dynamic>([
-        supabase
-            .from('user_semester_states')
-            .select('weekly_grid_cache')
-            .eq('user_id', currentUser.id)
-            .eq('semester_code', state.semesterCode)
-            .maybeSingle(),
-        supabase
-            .from('active_semester')
-            .select('classes_start_date, classes_end_date')
-            .eq('track', isBiSemester ? 'bi_semester' : 'tri_semester')
-            .maybeSingle(),
-        supabase
-            .from(CourseUtils.semesterTable(
-              'calendar',
-              state.semesterCode,
-              cycleType: isBiSemester ? 'bi_semester' : 'tri_semester',
-            ))
-            .select()
-            .catchError((_) => []),
-        supabase
-            .from('schedule_exceptions')
-            .select()
-            .eq('user_id', currentUser.id),
+        gridFuture,
+        holidaysFuture,
+        ExceptionRepository().fetchExceptions(),
         ref.read(semesterProgressRepositoryProvider).getSemesterProgressData(currentUser.id, state.semesterCode),
       ]);
 
-      final grid = (results[0] as Map<String, dynamic>?)?['weekly_grid_cache'] as Map<String, dynamic>? ?? {};
-      final activeSem = results[1] as Map<String, dynamic>?;
-      final holidays = results[2] as List;
-      final exceptions = results[3] as List;
-      final progressData = results[4] as List<Map<String, dynamic>>;
+      final rawGridRes = results[0];
+      if (rawGridRes is Map) {
+        final rawCache = rawGridRes['weekly_grid_cache'] ?? rawGridRes['weekly_grid'];
+        if (rawCache is Map) {
+          grid = Map<String, dynamic>.from(rawCache);
+        }
+      }
+      final holidays = results[1] as List;
+      final exceptions = results[2] as List;
+      final progressData = results[3] as List<Map<String, dynamic>>;
 
+      // Resolve classes_start_date & classes_end_date from Riverpod academicState / semConfig
+      DateTime? startDate;
+      DateTime? endDate;
+      final semConfig = state.semConfig;
+      if (semConfig != null) {
+        startDate = DateTime.tryParse(semConfig['classes_start_date']?.toString() ?? '');
+        endDate = DateTime.tryParse(semConfig['classes_end_date']?.toString() ?? '');
+      }
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
-      DateTime? startDate = DateTime.tryParse(activeSem?['classes_start_date']?.toString() ?? '');
-      DateTime? endDate = DateTime.tryParse(activeSem?['classes_end_date']?.toString() ?? '');
       final lookbackLimit = today.subtract(const Duration(days: 14));
       if (startDate == null || startDate.isBefore(lookbackLimit)) {
         startDate = lookbackLimit;
@@ -320,10 +362,9 @@ class DashboardController {
             final templates = scheduledTemplates.where((t) => t['day'] == dayName).toList();
 
             for (final temp in templates) {
-              final sessionType = temp['type'] ?? 'Theory';
-              final key = '${dateStr}_$sessionType';
+              final sessionType = CourseUtils.normalizeSessionType(temp['type']?.toString());
 
-              if (!dates.containsKey(key) && !dates.containsKey(dateStr)) {
+              if (!CourseUtils.isSessionMarked(dates, dateStr, sessionType)) {
                 // If today, check if class period ended
                 if (d.year == today.year && d.month == today.month && d.day == today.day) {
                   final endTimeStr = temp['end_time'] ?? '';
@@ -352,10 +393,9 @@ class DashboardController {
           final dateStr = makeup['date']?.toString() ?? '';
           final mDate = DateTime.tryParse(dateStr);
           if (mDate != null && (mDate.isBefore(endLimit) || mDate.isAtSameMomentAs(endLimit))) {
-            final sessionType = makeup['session_type']?.toString() ?? makeup['sessionType']?.toString() ?? 'Theory';
-            final key = '${dateStr}_$sessionType';
+            final sessionType = CourseUtils.normalizeSessionType(makeup['session_type']?.toString() ?? makeup['sessionType']?.toString());
 
-            if (!dates.containsKey(key) && !dates.containsKey(dateStr)) {
+            if (!CourseUtils.isSessionMarked(dates, dateStr, sessionType)) {
               if (mDate.year == today.year && mDate.month == today.month && mDate.day == today.day) {
                 final endTimeStr = (makeup['end_time'] ?? makeup['endTime'] ?? '').toString();
                 if (endTimeStr.isNotEmpty) {
@@ -399,9 +439,23 @@ class DashboardController {
     onStateChanged();
 
     try {
-      final courseMap = item['course_map'] as Map<String, dynamic>;
       final dateStr = item['dateStr'] as String;
-      final sessionType = item['session_type'] as String;
+      final sessionType = CourseUtils.normalizeSessionType(item['session_type'] as String?);
+      final courseCode = (item['course_code'] as String).toUpperCase().replaceAll(' ', '');
+
+      // Fresh lookup from SemesterProgressRepository to avoid stale course_map overwrite
+      final progressData = await ref.read(semesterProgressRepositoryProvider).getSemesterProgressData(
+        currentUser.id,
+        state.semesterCode,
+      );
+
+      final courseMap = progressData.firstWhere(
+        (c) => CourseUtils.areEquivalent(c['course_code'], courseCode),
+        orElse: () => item['course_map'] as Map<String, dynamic>? ?? <String, dynamic>{
+          'course_code': courseCode,
+          'semester_code': state.semesterCode,
+        },
+      );
 
       final updatedMap = Map<String, dynamic>.from(courseMap);
       final marksData = Map<String, dynamic>.from(updatedMap['marks_data'] ?? {});
@@ -420,12 +474,23 @@ class DashboardController {
       marksData['attendance'] = attendance;
       updatedMap['marks_data'] = marksData;
 
-      await ref.read(semesterProgressRepositoryProvider).saveCourseMarks(currentUser.id, state.semesterCode, updatedMap);
+      await ref.read(semesterProgressRepositoryProvider).saveCourseMarks(
+        currentUser.id,
+        state.semesterCode,
+        updatedMap,
+      );
+
+      // Keep pending attendance items up to date in case the user marks another session of the same course
+      for (final pi in state.pendingAttendanceItems) {
+        if (CourseUtils.areEquivalent(pi['course_code'], courseCode)) {
+          pi['course_map'] = updatedMap;
+        }
+      }
 
       state.pendingAttendanceItems.removeWhere((i) =>
-          CourseUtils.areEquivalent(i['course_code'], item['course_code']) &&
+          CourseUtils.areEquivalent(i['course_code'], courseCode) &&
           i['dateStr'] == dateStr &&
-          i['session_type'] == sessionType);
+          CourseUtils.normalizeSessionType(i['session_type'] as String?) == sessionType);
       state.isSavingAttendance = false;
       onStateChanged();
 
@@ -459,7 +524,7 @@ class DashboardController {
       for (final item in items) {
         final courseCode = (item['course_code'] as String).toUpperCase().replaceAll(' ', '');
         final dateStr = item['dateStr'] as String;
-        final sessionType = item['session_type'] as String;
+        final sessionType = CourseUtils.normalizeSessionType(item['session_type'] as String?);
 
         if (!accumulatedCourseUpdates.containsKey(courseCode)) {
           final courseMap = progressData.firstWhere(
@@ -500,8 +565,18 @@ class DashboardController {
 
       if (saveFutures.isNotEmpty) {
         await Future.wait(saveFutures);
+
+        for (final pi in state.pendingAttendanceItems) {
+          final pCode = (pi['course_code'] as String).toUpperCase().replaceAll(' ', '');
+          if (accumulatedCourseUpdates.containsKey(pCode)) {
+            pi['course_map'] = accumulatedCourseUpdates[pCode];
+          }
+        }
+
         state.pendingAttendanceItems.removeWhere((i) {
-          final key = '${(i['course_code'] as String).toUpperCase().replaceAll(' ', '')}_${i['dateStr']}_${i['session_type']}';
+          final cCode = (i['course_code'] as String).toUpperCase().replaceAll(' ', '');
+          final sType = CourseUtils.normalizeSessionType(i['session_type'] as String?);
+          final key = '${cCode}_${i['dateStr']}_$sType';
           return codesDatesAndTypes.contains(key);
         });
         state.isSavingAttendance = false;
@@ -528,8 +603,8 @@ class DashboardController {
     final currentUser = user;
     if (currentUser == null || state.semesterCode.isEmpty) return;
 
-    final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final sessionType = item.sessionType;
+    final targetDateStr = state.lastValidScheduleData?['dateStr'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final sessionType = CourseUtils.normalizeSessionType(item.sessionType);
     final courseCode = item.courseCode.toUpperCase().replaceAll(' ', '');
 
     final progressData = await ref.read(semesterProgressRepositoryProvider).getSemesterProgressData(currentUser.id, state.semesterCode);
@@ -550,11 +625,11 @@ class DashboardController {
     final dates = Map<String, dynamic>.from(attendance['dates'] ?? {});
     final types = Map<String, dynamic>.from(attendance['types'] ?? {});
 
-    final key = '${dateStr}_$sessionType';
+    final key = '${targetDateStr}_$sessionType';
     dates[key] = 'joined';
     types[key] = sessionType;
-    dates[dateStr] = 'joined';
-    types[dateStr] = sessionType;
+    dates[targetDateStr] = 'joined';
+    types[targetDateStr] = sessionType;
 
     attendance['dates'] = dates;
     attendance['types'] = types;
@@ -563,60 +638,19 @@ class DashboardController {
 
     await ref.read(semesterProgressRepositoryProvider).saveCourseMarks(currentUser.id, state.semesterCode, updatedMap);
 
+    for (final pi in state.pendingAttendanceItems) {
+      if (CourseUtils.areEquivalent(pi['course_code'], courseCode)) {
+        pi['course_map'] = updatedMap;
+      }
+    }
+
     state.pendingAttendanceItems.removeWhere((i) =>
         CourseUtils.areEquivalent(i['course_code'], courseCode) &&
-        i['dateStr'] == dateStr &&
-        i['session_type'] == sessionType);
+        i['dateStr'] == targetDateStr &&
+        CourseUtils.normalizeSessionType(i['session_type'] as String?) == sessionType);
     onStateChanged();
 
     ref.invalidate(semesterProgressDataProvider(state.semesterCode));
-  }
-
-  /// Synchronizes today's next class and schedule to HomeWidget
-  Future<void> updateHomeWidget(Map<String, dynamic> rawData) async {
-    if (kIsWeb) return;
-    try {
-      final processed = DashboardLogic.processDashboardData(rawData);
-      final nextClass = processed['next_class'] as ScheduleItem?;
-
-      if (nextClass != null) {
-        await HomeWidget.saveWidgetData<String>('widget_course_code', nextClass.courseCode);
-        await HomeWidget.saveWidgetData<String>('widget_course_title', nextClass.courseName);
-        await HomeWidget.saveWidgetData<String>('widget_start_time', nextClass.startTime);
-        await HomeWidget.saveWidgetData<String>('widget_room', nextClass.room);
-        await HomeWidget.saveWidgetData<String>('widget_status', 'UPCOMING');
-      } else {
-        await HomeWidget.saveWidgetData<String>('widget_status', 'NO_CLASSES');
-      }
-      await HomeWidget.updateWidget(name: 'EWUmateWidgetProvider', iOSName: 'EWUmateWidget');
-
-      final Map<String, dynamic> encodableData = {
-        'status': processed['status'],
-        'reason': processed['reason'],
-        'displayDate': processed['displayDate'],
-        'schedule': (processed['schedule'] as List? ?? []).map((item) {
-          if (item is ScheduleItem) {
-            return {
-              'courseCode': item.courseCode,
-              'courseName': item.courseName,
-              'sessionType': item.sessionType,
-              'startTime': item.startTime,
-              'endTime': item.endTime,
-              'room': item.room,
-              'faculty': item.faculty,
-              'isCancelled': item.isCancelled,
-              'isMakeup': item.isMakeup,
-            };
-          }
-          return item;
-        }).toList(),
-      };
-
-      await HomeWidget.saveWidgetData('schedule_json', jsonEncode(encodableData));
-      await HomeWidget.updateWidget(androidName: 'ScheduleWidgetProvider');
-    } catch (e) {
-      debugPrint('[DashboardController] HomeWidget sync error: $e');
-    }
   }
 
   Future<void> markTaskCompleted({

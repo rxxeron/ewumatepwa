@@ -159,11 +159,11 @@ class StudyVaultRepository {
       if (normalizedCourseCode != null) {
         final courseRes = await _supabase
             .from('course_metadata')
-            .select('same_course')
+            .select('equivalent_code, same_course')
             .eq('code', normalizedCourseCode)
             .maybeSingle();
         if (courseRes != null) {
-          sameCourseCode = courseRes['same_course'] as String?;
+          sameCourseCode = (courseRes['equivalent_code'] ?? courseRes['same_course']) as String?;
         }
       }
     } catch (_) {
