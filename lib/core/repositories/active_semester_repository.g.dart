@@ -7,7 +7,7 @@ part of 'active_semester_repository.dart';
 // **************************************************************************
 
 String _$activeSemesterRepositoryHash() =>
-    r'5faea2bd360d06c50a8a50e2e50204cfc58357dd';
+    r'061ab5d82344727ca63fce249011326eb442c754';
 
 /// See also [activeSemesterRepository].
 @ProviderFor(activeSemesterRepository)

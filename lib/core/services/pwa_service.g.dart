@@ -6,7 +6,7 @@ part of 'pwa_service.dart';
 // RiverpodGenerator
 // **************************************************************************
 
-String _$pwaControllerHash() => r'8268bbfea6f793d0f20956db680b32eb7428ef71';
+String _$pwaControllerHash() => r'd86971cea249dd198b42e517629d84410edb8e93';
 
 /// See also [PwaController].
 @ProviderFor(PwaController)

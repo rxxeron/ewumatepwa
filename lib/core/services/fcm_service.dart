@@ -253,6 +253,7 @@ class FCMService {
     });
 
     // Listen to token refresh
+    // ignore: deprecated_member_use
     _messaging.onTokenRefresh.listen((token) {
       _saveTokenToDatabase(token);
     });
@@ -266,6 +267,7 @@ class FCMService {
     try {
       if (Firebase.apps.isEmpty) return;
       final vapidKey = kIsWeb ? 'BO0Po4qenG7jOO_N-TIl1Ers3m46ehFoPthGQJ__Wxz9hjfuNtLNu6lqDsM_Cndjw6AADbo_x-E4K3Nu9mr_dI8' : null;
+      // ignore: deprecated_member_use
       final token = await _messaging.getToken(vapidKey: vapidKey);
       if (token != null) {
         final saved = await _saveTokenToDatabase(token);
