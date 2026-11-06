@@ -6,21 +6,51 @@ part of 'pwa_service.dart';
 // RiverpodGenerator
 // **************************************************************************
 
+// GENERATED CODE - DO NOT MODIFY BY HAND
+// ignore_for_file: type=lint, type=warning
+
+@ProviderFor(PwaController)
+final pwaControllerProvider = PwaControllerProvider._();
+
+final class PwaControllerProvider
+    extends $NotifierProvider<PwaController, PwaState> {
+  PwaControllerProvider._()
+      : super(
+          from: null,
+          argument: null,
+          retry: null,
+          name: r'pwaControllerProvider',
+          isAutoDispose: false,
+          dependencies: null,
+          $allTransitiveDependencies: null,
+        );
+
+  @override
+  String debugGetCreateSourceHash() => _$pwaControllerHash();
+
+  @$internal
+  @override
+  PwaController create() => PwaController();
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(PwaState value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<PwaState>(value),
+    );
+  }
+}
+
 String _$pwaControllerHash() => r'd86971cea249dd198b42e517629d84410edb8e93';
 
-/// See also [PwaController].
-@ProviderFor(PwaController)
-final pwaControllerProvider =
-    NotifierProvider<PwaController, PwaState>.internal(
-  PwaController.new,
-  name: r'pwaControllerProvider',
-  debugGetCreateSourceHash: const bool.fromEnvironment('dart.vm.product')
-      ? null
-      : _$pwaControllerHash,
-  dependencies: null,
-  allTransitiveDependencies: null,
-);
-
-typedef _$PwaController = Notifier<PwaState>;
-// ignore_for_file: type=lint
-// ignore_for_file: subtype_of_sealed_class, invalid_use_of_internal_member, invalid_use_of_visible_for_testing_member
+abstract class _$PwaController extends $Notifier<PwaState> {
+  PwaState build();
+  @$mustCallSuper
+  @override
+  WhenComplete runBuild() {
+    final ref = this.ref as $Ref<PwaState, PwaState>;
+    final element = ref.element as $ClassProviderElement<
+        AnyNotifier<PwaState, PwaState>, PwaState, Object?, Object?>;
+    return element.handleCreate(ref, build);
+  }
+}

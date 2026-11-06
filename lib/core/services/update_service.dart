@@ -12,7 +12,7 @@ external void _reloadPage();
 external set _onServiceWorkerUpdateCallback(JSFunction? callback);
 
 @Riverpod(keepAlive: true)
-void updateListener(UpdateListenerRef ref) {
+void updateListener(Ref ref) {
   _onServiceWorkerUpdateCallback = (() {
     final context = rootNavigatorKey.currentContext;
     if (context == null) return;

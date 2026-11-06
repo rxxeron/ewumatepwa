@@ -77,7 +77,7 @@ class GoalInputGrid extends ConsumerWidget {
             final cleanCode = course.courseCode.toUpperCase().replaceAll(' ', '');
             final currentGoal = goals[cleanCode] ?? goals[course.courseCode] ?? course.gradeGoal ?? 'A';
             final policy = GradeHelper.getPolicyForSemester(course.semesterCode);
-            final gradeScaleMap = ref.watch(gradeScaleMapProvider(policy)).valueOrNull ?? {};
+            final gradeScaleMap = ref.watch(gradeScaleMapProvider(policy)).value ?? {};
 
             final double evaluatedMarks = course.totalEvaluated;
             final double obtained = course.totalObtained;
