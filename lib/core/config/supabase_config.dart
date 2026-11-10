@@ -22,7 +22,7 @@ class AppConfig {
   }
   static String get getAzureFunctionUrl {
     final val = _env('AZURE_FUNCTION_URL');
-    return val.isNotEmpty ? val : 'https://ewumate-parser.azurewebsites.net';
+    return val.isNotEmpty ? val : 'https://ewumate-parser-api.azurewebsites.net';
   }
   static String get getGoogleWebClientId {
     final val = _env('GOOGLE_WEB_CLIENT_ID');
