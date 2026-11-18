@@ -3,22 +3,39 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/data_providers.dart';
+import '../data/db/app_database.dart';
+import '../data/sync/scope_catalog.dart';
 import '../models/faculty_office_hour.dart';
 import '../providers/supabase_provider.dart';
 
 final officeHoursRepositoryProvider = Provider<OfficeHoursRepository>((ref) {
-  return OfficeHoursRepository(ref.watch(supabaseClientProvider));
+  return OfficeHoursRepository(ref.watch(supabaseClientProvider), ref.watch(appDatabaseProvider));
 });
 
 class OfficeHoursRepository {
   final SupabaseClient _supabase;
+  final AppDatabase _db;
 
-  OfficeHoursRepository(this._supabase);
+  OfficeHoursRepository(this._supabase, this._db);
 
-  // Fetch approved office hours for a faculty member for a specific semester
+  /// Approved office hours of a faculty member in a semester — from the local
+  /// copy (scope `faculty`, approved rows only), so it works offline.
   Future<List<FacultyOfficeHour>> getApprovedOfficeHours(String initials, String semesterCode) async {
+    final normalized = initials.trim().toUpperCase();
+    final sem = normSemester(semesterCode);
+    final local = await _db.getRows('faculty_office_hours');
+    if (local.isNotEmpty) {
+      final rows = local
+          .where((r) =>
+              r['status'] == 'approved' &&
+              normSemester('${r['semester_code']}') == sem &&
+              '${r['faculty_initials']}'.trim().toUpperCase() == normalized)
+          .toList()
+        ..sort((a, b) => '${a['day']}'.compareTo('${b['day']}'));
+      return rows.map(FacultyOfficeHour.fromMap).toList();
+    }
     try {
-      final normalized = initials.trim().toUpperCase();
       final data = await _supabase
           .from('faculty_office_hours')
           .select()

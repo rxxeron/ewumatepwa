@@ -17,16 +17,11 @@ class CacheService {
   Future<void> init() async {
     try {
       await Hive.initFlutter();
-      await Hive.openBox('course_catalog');
-      await Hive.openBox(_profileBox);
-      await Hive.openBox(_dashboardBox);
-      await Hive.openBox(_scheduleBox);
-      await Hive.openBox(_syncQueueBox);
-      await Hive.openBox(_semesterProgressBox);
-      await Hive.openBox(_notificationsBox);
-      await Hive.openBox(_routineCacheBox);
-      await Hive.openBox(_authBox);
-      await Hive.openBox('faculty');
+      // Open all boxes concurrently (was 10 sequential awaits on the launch path).
+      await Future.wait([
+        'course_catalog', _profileBox, _dashboardBox, _scheduleBox, _syncQueueBox,
+        _semesterProgressBox, _notificationsBox, _routineCacheBox, _authBox, 'faculty',
+      ].map(Hive.openBox));
       if (kDebugMode) debugPrint('[CacheService] Successfully initialized Hive boxes.');
     } catch (e) {
       if (kDebugMode) debugPrint('[CacheService] Failed to initialize Hive: $e');

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_colors.dart';
 import '../repositories/auth_repository.dart';
+import '../data/sign_out.dart';
 import '../repositories/profile_repository.dart';
 
 class AppDrawer extends ConsumerWidget {
@@ -323,8 +324,7 @@ class AppDrawer extends ConsumerWidget {
                               ),
                             ),
                             onTap: () async {
-                              await ref.read(authRepositoryProvider).signOut();
-                              if (context.mounted) {
+                              if (await signOutSafely(context, ref) && context.mounted) {
                                 context.go('/login');
                               }
                             },

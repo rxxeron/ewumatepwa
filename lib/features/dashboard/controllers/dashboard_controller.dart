@@ -1,16 +1,16 @@
-import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/models/academic_state.dart';
 import '../../../core/models/task.dart';
 import '../../../core/providers/academic_providers.dart';
 import '../../../core/repositories/task_repository.dart';
-import '../../../core/services/cache_service.dart';
+import '../../../core/data/data_providers.dart';
+import '../../../core/data/repos/local_queries.dart';
 import '../../../core/utils/course_utils.dart';
 import '../../../core/utils/time_utils.dart';
 import '../../auth/auth_providers.dart';
@@ -48,87 +48,20 @@ class DashboardController {
   Future<void> refreshDashboard({
     required WidgetRef ref,
     bool isSilent = false,
+    bool isManual = false,
     DateTime? effectiveDate,
   }) async {
     final currentUser = user;
     if (currentUser == null) return;
 
-    if (!isSilent && state.lastValidScheduleData != null) {
+    if (isManual) {
       ref.invalidate(academicStateProvider);
     }
 
-    // PHASE 0: Instant Cache Load from Hive (Frame 0, < 5ms)
-    if (state.lastValidScheduleData == null) {
-      try {
-        final now = DateTime.now();
-        final targetDate = effectiveDate ??
-            (now.hour >= 20
-                ? DateTime(now.year, now.month, now.day).add(const Duration(days: 1))
-                : now);
-        final targetDateStr = DateFormat('yyyy-MM-dd').format(targetDate);
-        final dayName = DateFormat('EEEE').format(targetDate);
-
-        final cacheService = ref.read(cacheServiceProvider);
-        final cachedSemState = cacheService.getMapData('dashboard_box', '${currentUser.id}_academicState');
-        final semCode = cachedSemState?['current_semester_code'] as String?;
-
-        if (semCode != null && semCode.isNotEmpty) {
-          final cleanSem = CourseUtils.cleanSemester(semCode);
-          // 1. Try exact date match first
-          final exactDateCache = cacheService.getCachedDashboardSchedule(currentUser.id, cleanSem, dateStr: targetDateStr);
-          if (exactDateCache != null) {
-            state.lastValidScheduleData = exactDateCache;
-            state.semesterCode = semCode;
-            state.loadingInit = false;
-            onStateChanged();
-          } else {
-            // 2. Synthesize today's schedule from cached weekly_grid in 0ms!
-            final generalCache = cacheService.getCachedDashboardSchedule(currentUser.id, cleanSem);
-            if (generalCache != null && generalCache['weekly_grid'] is Map) {
-              final grid = generalCache['weekly_grid'] as Map;
-              final todayClasses = (grid[dayName] as List? ?? []);
-              final synthesized = Map<String, dynamic>.from(generalCache);
-              synthesized['date'] = targetDate;
-              synthesized['dateStr'] = targetDateStr;
-              synthesized['template'] = List<Map<String, dynamic>>.from(
-                todayClasses.map((c) => c is Map ? Map<String, dynamic>.from(c) : <String, dynamic>{}),
-              );
-              synthesized['status'] = todayClasses.isEmpty ? 'chill' : 'normal';
-              state.lastValidScheduleData = synthesized;
-              state.semesterCode = semCode;
-              state.loadingInit = false;
-              onStateChanged();
-            }
-          }
-        }
-
-        // Fallback scan if academicState was never cached for this user
-        if (state.lastValidScheduleData == null) {
-          final box = Hive.box('dashboard_box');
-          for (final key in box.keys) {
-            if (key is String && key.startsWith('${currentUser.id}_') && key.endsWith('_schedule')) {
-              final data = box.get(key);
-              if (data != null) {
-                final cached = Map<String, dynamic>.from(jsonDecode(data as String) as Map);
-                final parts = key.split('_');
-                state.lastValidScheduleData = cached;
-                if (parts.length >= 3 && state.semesterCode.isEmpty) {
-                  state.semesterCode = parts[1];
-                }
-                state.loadingInit = false;
-                onStateChanged();
-                break;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('[DashboardController] Fast cache load error: $e');
-      }
-    }
-
+    // The local database IS the instant source now: no separate Hive pre-load phase.
     try {
-      final academicState = await ref.read(academicStateProvider.future);
+      final AcademicState? academicState = await ref.read(academicStateProvider.future);
+
       if (academicState == null) {
         state.loadingInit = false;
         onStateChanged();
@@ -139,9 +72,7 @@ class DashboardController {
       final track = academicState.track;
       final nextSemesterCode = academicState.nextSemesterCode;
 
-      final profile = ref.read(profileProvider).value;
-      final cachedProfile = ref.read(cacheServiceProvider).getCachedProfile(currentUser.id);
-      final profileUpdatedAt = profile?.updatedAt ?? (cachedProfile != null ? cachedProfile['updated_at'] : null);
+      final profileUpdatedAt = ref.read(profileProvider).value?.updatedAt;
 
       final now = DateTime.now();
       final targetDate = effectiveDate ??
@@ -170,7 +101,7 @@ class DashboardController {
         return <String, dynamic>{};
       }).where((m) => m.isNotEmpty).toList();
 
-      // PWA service worker updates are handled via updateListenerProvider
+      // Google Play In-App Update is handled automatically on launch via AppUpdateService
       state.showUpdateBanner = false;
 
       onStateChanged();
@@ -195,7 +126,6 @@ class DashboardController {
     try {
       final profile = ref.read(profileProvider).value;
       final bool isBiSemester = CourseUtils.normalizeTrack(profile?.track) == 'bi_semester';
-      final cacheService = ref.read(cacheServiceProvider);
 
       // Fast check: retrieve weeklyGrid and semConfig already in memory / cache
       Map<String, dynamic> grid = {};
@@ -205,46 +135,20 @@ class DashboardController {
       }
 
       // If weeklyGrid was not preserved in scheduleData, check user_semester_states
+      final local = LocalQueries(ref.read(appDatabaseProvider));
       final Future<dynamic> gridFuture = grid.isNotEmpty
           ? Future.value({'weekly_grid_cache': grid})
-          : supabase
-              .from('user_semester_states')
-              .select('weekly_grid_cache')
-              .eq('user_id', currentUser.id)
-              .eq('semester_code', state.semesterCode)
-              .maybeSingle();
+          : local.weeklyGrid(currentUser.id, state.semesterCode).then((g) => {'weekly_grid_cache': g});
 
-      // Read calendar holidays with local CacheService or Redis fallback
-      final cleanSem = CourseUtils.cleanSemester(state.semesterCode).toLowerCase();
+      // Calendar of the student's track, from the synced local copy.
       final calendarTable = CourseUtils.semesterTable(
         'calendar',
         state.semesterCode,
         cycleType: isBiSemester ? 'bi_semester' : 'tri_semester',
       );
-
-      final Future<dynamic> holidaysFuture = Future<dynamic>(() async {
-        // Try Hive cache first
-        final cachedHolidays = cacheService.getMapData('dashboard_box', '${cleanSem}_${isBiSemester ? "bi" : "tri"}_holidays');
-        if (cachedHolidays != null && cachedHolidays['events'] is List) {
-          final cachedAtStr = cachedHolidays['cached_at'] as String?;
-          final cachedAt = cachedAtStr != null ? DateTime.tryParse(cachedAtStr) : null;
-          if (cachedAt != null && DateTime.now().difference(cachedAt).inHours < 4) {
-            return cachedHolidays['events'] as List;
-          }
-        }
-        try {
-          final res = await supabase.from(calendarTable).select().order('event_date');
-          if (res.isNotEmpty) {
-            cacheService.setMapData('dashboard_box', '${cleanSem}_${isBiSemester ? "bi" : "tri"}_holidays', {
-              'events': res,
-              'cached_at': DateTime.now().toIso8601String(),
-            });
-          }
-          return res;
-        } catch (_) {
-          return (cachedHolidays?['events'] as List?) ?? <dynamic>[];
-        }
-      });
+      final Future<dynamic> holidaysFuture = local
+          .calendarEvents(calendarTable)
+          .then((rows) => rows..sort((a, b) => '${a['event_date']}'.compareTo('${b['event_date']}')));
 
       final results = await Future.wait<dynamic>([
         gridFuture,
@@ -263,6 +167,8 @@ class DashboardController {
       final holidays = results[1] as List;
       final exceptions = results[2] as List;
       final progressData = results[3] as List<Map<String, dynamic>>;
+
+      // (Reminders are rescheduled by ReminderCoordinator when routine inputs change, not from here.)
 
       // Resolve classes_start_date & classes_end_date from Riverpod academicState / semConfig
       DateTime? startDate;
@@ -319,6 +225,14 @@ class DashboardController {
       };
 
       final DateTime endLimit = endDate.isAfter(today) ? today : endDate;
+
+      // SAFEGUARD: If progressData is empty, we do NOT have reliable marks/attendance records
+      // so avoid flooding the user with Day 1 pending attendance.
+      if (progressData.isEmpty) {
+        state.pendingAttendanceItems = [];
+        onStateChanged();
+        return;
+      }
 
       final List<Map<String, dynamic>> pendingItems = [];
 

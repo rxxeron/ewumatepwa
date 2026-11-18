@@ -1,96 +1,61 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ewumate/core/repositories/progress_repository.dart';
-import 'package:ewumate/core/repositories/auth_repository.dart';
-import 'package:ewumate/core/repositories/profile_repository.dart';
-import 'package:ewumate/core/repositories/active_semester_repository.dart';
-import 'package:ewumate/core/services/cache_service.dart';
 import 'package:ewumate/core/models/academic_state.dart';
-import 'package:ewumate/core/providers/supabase_provider.dart';
 import 'package:ewumate/core/utils/course_utils.dart';
+import 'package:ewumate/core/data/data_providers.dart';
+import 'package:ewumate/core/data/repos/local_writer.dart';
+import 'package:ewumate/features/auth/auth_providers.dart';
 
 final programDetailsProvider = FutureProvider.family<Map<String, dynamic>?, String>((ref, programCode) async {
-  final repo = ref.watch(progressRepositoryProvider);
-  return repo.getProgramDetails(programCode);
+  final rows = await ref.watch(localRowsProvider(('programs', null)).future);
+  final local = rows.where((r) => '${r['program_code']}'.toUpperCase() == programCode.toUpperCase()).firstOrNull;
+  if (local != null) return local;
+  // Not synced yet (first launch): fall back to the network once.
+  return ref.watch(progressRepositoryProvider).getProgramDetails(programCode);
 });
 
-final academicStateProvider = StreamProvider<AcademicState?>((ref) async* {
-  final user = ref.watch(currentUserProvider);
-  if (user == null) {
-    yield null;
-    return;
-  }
+/// The single source of "which semester is it" for the signed-in user:
+/// local `active_semester` row of the user's track. Replaces the separate
+/// resolvers and hard-coded fallbacks scattered across features.
+final academicStateProvider = FutureProvider<AcademicState?>((ref) async {
+  if (ref.watch(currentUserIdProvider) == null) return null;
+  final profile = await ref.watch(profileProvider.future);
+  final rows = await ref.watch(localRowsProvider(('active_semester', null)).future);
+  if (rows.isEmpty) return null;
 
-  final cacheService = ref.read(cacheServiceProvider);
-  final cachedSem = cacheService.getMapData('dashboard_box', '${user.id}_academicState');
-
-  // 1. Yield Cache Immediately if available (Frame 1)
-  if (cachedSem != null) {
-    yield AcademicState.fromJson(cachedSem);
-
-    // If cache is fresh (< 1 day old), do not hit database
-    final cacheUpdatedAtStr = cachedSem['_cache_updated_at'] as String?;
-    if (cacheUpdatedAtStr != null) {
-      final cachedTime = DateTime.tryParse(cacheUpdatedAtStr);
-      if (cachedTime != null && DateTime.now().difference(cachedTime) < const Duration(days: 1)) {
-        return;
-      }
-    }
-  }
-
-  try {
-    // 2. Fetch fresh active semester concurrently
-    final cachedProfile = cacheService.getCachedProfile(user.id);
-    final knownTrack = CourseUtils.normalizeTrack(cachedProfile?['track'] ?? cachedSem?['track']);
-
-    final profileFuture = ref.read(profileRepositoryProvider).getProfile(user.id).timeout(const Duration(seconds: 6));
-    final semesterFuture = ref.read(activeSemesterRepositoryProvider).getActiveSemester(knownTrack).timeout(const Duration(seconds: 6));
-
-    final results = await Future.wait<dynamic>([profileFuture, semesterFuture]);
-    final profile = results[0];
-    final semesterData = results[1] as Map<String, dynamic>;
-    final track = CourseUtils.normalizeTrack(profile?.track ?? knownTrack);
-
-    final Map<String, dynamic> stateDict = {
-      ...semesterData,
-      'track': track,
-      '_cache_updated_at': DateTime.now().toIso8601String(),
-    };
-    cacheService.setMapData('dashboard_box', '${user.id}_academicState', stateDict);
-    yield AcademicState.fromJson(stateDict);
-  } catch (e) {
-    // 3. Fallback check: if we have no cache yielded, report error
-    if (cachedSem == null) {
-      throw Exception("Could not load active semester from database: $e");
-    }
-  }
+  final track = CourseUtils.normalizeTrack(profile?.track ?? profile?.semesterType);
+  final row = rows.where((r) => r['track'] == track).firstOrNull ?? rows.first;
+  return AcademicState.fromJson({
+    ...row,
+    'track': track,
+    'current_semester_code': row['current_semester_code'] ?? '',
+    'next_semester_code': row['next_semester_code'] ?? '',
+  });
 });
 
 final currentSemesterCodeProvider = FutureProvider<String?>((ref) async {
-  final asyncState = ref.watch(academicStateProvider);
-  return asyncState.value?.currentSemesterCode;
+  final s = await ref.watch(academicStateProvider.future);
+  final code = s?.currentSemesterCode;
+  return (code == null || code.isEmpty) ? null : code;
 });
 
 final nextSemesterCodeProvider = FutureProvider<String?>((ref) async {
-  final asyncState = ref.watch(academicStateProvider);
-  return asyncState.value?.nextSemesterCode;
+  final s = await ref.watch(academicStateProvider.future);
+  final code = s?.nextSemesterCode;
+  return (code == null || code.isEmpty) ? null : code;
 });
 
 final semestersProvider = FutureProvider<List<dynamic>>((ref) async {
-  final repo = ref.watch(activeSemesterRepositoryProvider);
-  final data = await repo.getAllSemesters();
-  
-  // Use a Set to ensure unique titles
-  final titles = data.map((e) => e['title'].toString()).toSet().toList();
-  
+  final rows = await ref.watch(localRowsProvider(('semesters', null)).future);
+  final titles = rows.map((e) => e['title'].toString()).toSet().toList();
   return titles.map((t) => (title: t)).toList();
 });
 
 final facultySnapshotsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
-  final supabase = ref.watch(supabaseClientProvider);
-  final res = await supabase.from('app_config').select('value').eq('key', 'faculty_snapshots').single();
-  
-  if (res['value'] != null && res['value']['snapshots'] != null) {
-    return List<Map<String, dynamic>>.from(res['value']['snapshots']);
+  final rows = await ref.watch(localRowsProvider(('app_config', null)).future);
+  final value = rows.where((r) => r['key'] == 'faculty_snapshots').firstOrNull?['value'];
+  if (value is Map && value['snapshots'] is List) {
+    return List<Map<String, dynamic>>.from(value['snapshots'] as List);
   }
   return [];
 });

@@ -12,10 +12,11 @@ import '../../dashboard/dashboard_repository.dart';
 import '../../dashboard/exception_repository.dart';
 import '../../../core/widgets/glass_kit.dart';
 import '../../../core/widgets/ewumate_app_bar.dart';
-import '../../../core/utils/course_utils.dart';
 import '../../../core/providers/academic_providers.dart';
 import '../../../core/repositories/profile_repository.dart';
-import '../../../core/services/cache_service.dart';
+import '../../../core/data/data_providers.dart';
+import '../../../core/data/repos/local_queries.dart';
+import '../../../core/data/sync/scope_catalog.dart';
 import 'widgets/pending_events_tab.dart';
 import 'widgets/add_manual_class_sheet.dart';
 import 'widgets/schedule_upcoming_tab.dart';
@@ -47,8 +48,17 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
   void initState() {
     super.initState();
     _loadData();
-    _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (mounted) _loadData();
+    // Reload from local data when the user's schedule rows change (sync or an edit) — no polling.
+    final db = ref.read(appDatabaseProvider);
+    _dataChanges = (db.select(db.syncedRows)
+          ..where((t) => t.tbl.isIn(const ['user_semester_states', 'schedule_exceptions', 'enrollments'])))
+        .watch()
+        .skip(1)
+        .listen((_) {
+      _refreshTimer?.cancel();
+      _refreshTimer = Timer(const Duration(milliseconds: 400), () {
+        if (mounted) _loadData();
+      });
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -62,9 +72,12 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
     });
   }
 
+  StreamSubscription<dynamic>? _dataChanges;
+
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _dataChanges?.cancel();
     super.dispose();
   }
 
@@ -73,42 +86,9 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
     if (sem != null) _loadDataForSemester(sem);
   }
 
-  Future<void> _invalidateDashboardCache() async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user != null && _semesterCode != null) {
-      final cacheService = ref.read(cacheServiceProvider);
-      final repo = ref.read(dashboardRepositoryProvider);
-      final profile = ref.read(userProfileProvider).value;
-      final safeSem = CourseUtils.cleanSemester(_semesterCode!);
-
-      final now = DateTime.now();
-      final effectiveDate = now.hour >= 20
-          ? DateTime(now.year, now.month, now.day).add(const Duration(days: 1))
-          : DateTime(now.year, now.month, now.day);
-
-      try {
-        final freshData = await repo.getSimplifiedDashboardData(
-          _semesterCode!,
-          effectiveDate,
-          track: profile?.track,
-          profileUpdatedAt: profile?.updatedAt,
-        );
-
-        final cachePayload = {...freshData, 'date': effectiveDate.toIso8601String()};
-        await cacheService.cacheDashboardSchedule(user.id, safeSem, cachePayload);
-
-
-        if (kDebugMode) {
-          debugPrint('[ScheduleScreen] Successfully updated Cache with fresh schedule.');
-        }
-      } catch (e) {
-        await cacheService.invalidateDashboardSchedule(user.id, safeSem);
-        if (kDebugMode) {
-          debugPrint('[ScheduleScreen] Failed to update cache. Purged cache: $e');
-        }
-      }
-    }
-  }
+  /// Kept for call sites: the dashboard now re-derives itself from local rows
+  /// whenever they change, so there is no separate cache to refresh.
+  Future<void> _invalidateDashboardCache() async {}
 
 
   @override
@@ -263,13 +243,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
         final List<Map<String, String>> courseData = [];
         final Set<String> seenCodes = {};
 
-        final stateData = await supabase
-            .from('user_semester_states')
-            .select('weekly_grid_cache')
-            .eq('user_id', user.id)
-            .eq('semester_code', semCode)
-            .maybeSingle();
-        final grid = stateData?['weekly_grid_cache'] as Map<String, dynamic>? ?? {};
+        final db = ref.read(appDatabaseProvider);
+        final grid = await LocalQueries(db).weeklyGrid(user.id, semCode);
         
         for (final dayClasses in grid.values) {
           if (dayClasses is List) {
@@ -289,24 +264,13 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
         }
 
         if (courseData.isEmpty) {
-          final safeSem = CourseUtils.cleanSemester(semCode);
-          final spaceSem = semCode.replaceAllMapped(RegExp(r'([a-zA-Z]+)(\d+)'), (m) => '${m[1]} ${m[2]}');
-          
-          final enrollments = await supabase
-              .from('enrollments')
-              .select('course_code')
-              .eq('user_id', user.id)
-              .inFilter('semester_code', [semCode, safeSem, spaceSem, semCode.toLowerCase(), semCode.replaceAll(' ', '')]);
-          
-          final marks = await supabase
-              .from('semester_course_marks')
-              .select('course_code')
-              .eq('user_id', user.id)
-              .inFilter('semester_code', [semCode, safeSem, spaceSem, semCode.toLowerCase(), semCode.replaceAll(' ', '')]);
+          final sem = normSemester(semCode);
+          final enrollments = await db.getRows('enrollments', semester: sem);
+          final marks = await db.getRows('semester_course_marks', semester: sem);
 
           final Set<String> allCodes = {
-            ...(enrollments as List).map((e) => e['course_code'].toString()),
-            ...(marks as List).map((e) => e['course_code'].toString()),
+            ...enrollments.where((e) => e['user_id'] == user.id).map((e) => e['course_code'].toString()),
+            ...marks.where((e) => e['user_id'] == user.id).map((e) => e['course_code'].toString()),
           };
 
           for (final codeRaw in allCodes) {

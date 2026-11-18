@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart';
+import '../../../core/data/db/app_database.dart';
+import '../../../core/data/repos/local_queries.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/utils/course_utils.dart';
+import '../../dashboard/exception_repository.dart';
 import '../widgets/attendance_sessions_tab.dart';
 
 class AttendanceCalendarResult {
@@ -19,9 +22,6 @@ class AttendanceCalendarResult {
 }
 
 class AttendanceCalendarService {
-  static final Map<String, (DateTime startDate, DateTime endDate, DateTime cachedAt)> _datesCache = {};
-  static const Duration _datesCacheTtl = Duration(hours: 12);
-
   /// Generates the semester class session timeline by cross-referencing:
   /// 1. Semester start & end dates from active_semester
   /// 2. User's routine grid cache (class weekdays and session types)
@@ -41,44 +41,14 @@ class AttendanceCalendarService {
     final resolvedTrack = CourseUtils.normalizeTrack(userTrack);
     final cleanSem = CourseUtils.cleanSemester(semesterCode);
 
-    // 1. Fetch active semester start/end dates (with 12h in-memory cache)
-    DateTime startDate;
-    DateTime endDate;
-
-    final cachedEntry = _datesCache[resolvedTrack];
-    if (cachedEntry != null && DateTime.now().difference(cachedEntry.$3) < _datesCacheTtl) {
-      startDate = cachedEntry.$1;
-      endDate = cachedEntry.$2;
-    } else {
-      try {
-        final activeSemRes = await Supabase.instance.client
-            .from('active_semester')
-            .select('classes_start_date, classes_end_date')
-            .eq('track', resolvedTrack)
-            .maybeSingle();
-
-        final parsedStart = DateTime.tryParse(activeSemRes?['classes_start_date']?.toString() ?? '');
-        final parsedEnd = DateTime.tryParse(activeSemRes?['classes_end_date']?.toString() ?? '');
-        startDate = parsedStart ?? DateTime.now().subtract(const Duration(days: 45));
-        endDate = parsedEnd ?? DateTime.now().add(const Duration(days: 45));
-
-        _datesCache[resolvedTrack] = (startDate, endDate, DateTime.now());
-      } catch (e) {
-        debugPrint('[Attendance] active_semester fetch error: $e');
-        startDate = cachedEntry?.$1 ?? DateTime.now().subtract(const Duration(days: 45));
-        endDate = cachedEntry?.$2 ?? DateTime.now().add(const Duration(days: 45));
-      }
-    }
-
-    // 2. Fetch weekly grid template to identify class weekdays
-    final stateData = await Supabase.instance.client
-        .from('user_semester_states')
-        .select('weekly_grid_cache')
-        .eq('user_id', user.id)
-        .inFilter('semester_code', [semesterCode, cleanSem])
-        .maybeSingle();
-    final grid = stateData?['weekly_grid_cache'] as Map<String, dynamic>? ?? {};
-
+    // 1. Semester start/end dates and 2. the weekly grid — both from the local database.
+    final local = LocalQueries(AppDatabase.main);
+    final activeSem = await local.activeSemester(resolvedTrack);
+    final startDate = DateTime.tryParse('${activeSem?['classes_start_date'] ?? ''}') ??
+        DateTime.now().subtract(const Duration(days: 45));
+    final endDate = DateTime.tryParse('${activeSem?['classes_end_date'] ?? ''}') ??
+        DateTime.now().add(const Duration(days: 45));
+    final Map<String, dynamic> grid = await local.weeklyGrid(user.id, cleanSem);
     final String currentCourseCodeNormalized = courseCode.toUpperCase().replaceAll(' ', '');
 
     final List<Map<String, String>> scheduledTemplates = [];
@@ -98,7 +68,7 @@ class AttendanceCalendarService {
       if (dayClasses is List) {
         for (final c in dayClasses) {
           final code = (c['courseCode'] ?? c['course_code'] ?? '').toString().toUpperCase().replaceAll(' ', '');
-          if (code == currentCourseCodeNormalized) {
+          if (CourseUtils.areEquivalent(code, currentCourseCodeNormalized)) {
             final startTime = (c['startTime'] ?? c['start_time'] ?? '').toString();
             final endTime = (c['endTime'] ?? c['end_time'] ?? '').toString();
             final isLab = CourseUtils.isLab(startTime, endTime, code);
@@ -112,7 +82,7 @@ class AttendanceCalendarService {
       }
     }
 
-    // 3. Fetch academic calendar holidays
+    // 3. Fetch academic calendar holidays (Offline-first)
     final tableName = CourseUtils.semesterTable(
       'calendar',
       cleanSem,
@@ -120,44 +90,40 @@ class AttendanceCalendarService {
     );
 
     final Set<String> holidayDates = {};
-    try {
-      final calendarRes = await Supabase.instance.client.from(tableName).select();
-      for (final ev in calendarRes) {
-        final dateStr = (ev['event_date'] ?? ev['date'] ?? '').toString();
-        final title = (ev['title'] ?? ev['name'] ?? '').toString().toLowerCase();
-        final isHoliday = ev['is_holiday'] == true ||
-            ev['type']?.toString().toLowerCase() == 'holiday' ||
-            title.contains('holiday') ||
-            title.contains('vacation') ||
-            title.contains('break') ||
-            title.contains('leave') ||
-            title.contains('off day') ||
-            title.contains('no classes');
-        if (isHoliday && dateStr.isNotEmpty) {
-          holidayDates.add(dateStr);
-        }
+    final List<dynamic> calendarEvents = await local.calendarEvents(tableName);
+
+    for (final ev in calendarEvents) {
+      final dateStr = (ev['event_date'] ?? ev['date'] ?? '').toString();
+      final title = (ev['title'] ?? ev['name'] ?? '').toString().toLowerCase();
+      final isHoliday = ev['is_holiday'] == true ||
+          ev['type']?.toString().toLowerCase() == 'holiday' ||
+          title.contains('holiday') ||
+          title.contains('vacation') ||
+          title.contains('break') ||
+          title.contains('leave') ||
+          title.contains('off day') ||
+          title.contains('no classes');
+      if (isHoliday && dateStr.isNotEmpty) {
+        holidayDates.add(dateStr);
       }
-    } catch (e) {
-      debugPrint('[Attendance] Calendar fetch failed or table does not exist: $e');
     }
 
     // 4. Fetch cancellations and makeups from schedule exceptions
     final Set<String> cancelledDates = {};
     final List<Map<String, dynamic>> courseMakeups = [];
     try {
-      final exceptionsRes = await Supabase.instance.client
-          .from('schedule_exceptions')
-          .select()
-          .eq('user_id', user.id)
-          .eq('course_code', currentCourseCodeNormalized);
-      for (final ex in exceptionsRes) {
-        final dateStr = ex['date']?.toString();
-        final type = ex['type']?.toString();
-        if (dateStr != null && dateStr.isNotEmpty) {
-          if (type == 'cancel') {
-            cancelledDates.add(dateStr);
-          } else if (type == 'makeup' || type == 'manual') {
-            courseMakeups.add(ex);
+      final exceptionsList = await ExceptionRepository().fetchExceptions();
+      for (final ex in exceptionsList) {
+        final exCourse = (ex['course_code'] ?? ex['courseCode'] ?? '').toString().toUpperCase().replaceAll(' ', '');
+        if (CourseUtils.areEquivalent(exCourse, currentCourseCodeNormalized)) {
+          final dateStr = ex['date']?.toString();
+          final type = ex['type']?.toString();
+          if (dateStr != null && dateStr.isNotEmpty) {
+            if (type == 'cancel') {
+              cancelledDates.add(dateStr);
+            } else if (type == 'makeup' || type == 'manual') {
+              courseMakeups.add(ex);
+            }
           }
         }
       }

@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../providers/supabase_provider.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../data/repos/local_writer.dart';
 import '../repositories/active_semester_repository.dart';
 import '../../features/auth/auth_providers.dart';
 
@@ -49,53 +49,25 @@ Future<bool> isNextSemesterOpen(Ref ref) async {
 ///   "link_url": "https://...",
 ///   "title": "Optional label"
 /// }
-final promoBannerProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
-  final supabase = ref.watch(supabaseClientProvider);
-  try {
-    final res = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'promo_banner')
-        .maybeSingle();
+/// app_config value by key from the local database (scope `reference`, pulled
+/// when an admin changes it) — no network query per screen.
+Future<Object?> _localConfig(Ref ref, String key) async {
+  final rows = await ref.watch(localRowsProvider(('app_config', null)).future);
+  final v = rows.where((r) => r['key'] == key).firstOrNull?['value'];
+  if (v is String) {
+    try {
+      return jsonDecode(v);
+    } catch (_) {}
+  }
+  return v;
+}
 
-    if (res != null && res['value'] != null) {
-      final val = res['value'];
-      if (val is Map) return Map<String, dynamic>.from(val);
-      if (val is String) {
-        // Support JSON string values too
-        try {
-          final decoded = jsonDecode(val);
-          if (decoded is Map) return Map<String, dynamic>.from(decoded);
-        } catch (_) {}
-      }
-    }
-  } catch (_) {}
-  return null;
+final promoBannerProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
+  final val = await _localConfig(ref, 'promo_banner');
+  return val is Map ? Map<String, dynamic>.from(val) : null;
 });
 
 final isDonationPopupEnabledProvider = FutureProvider<bool>((ref) async {
-  final supabase = ref.watch(supabaseClientProvider);
-  try {
-    final res = await supabase
-        .from('app_config')
-        .select('value')
-        .eq('key', 'donation_popup')
-        .maybeSingle();
-
-    if (res != null && res['value'] != null) {
-      final val = res['value'];
-      if (val is Map) {
-        return val['is_active'] == true;
-      }
-      if (val is String) {
-        try {
-          final decoded = jsonDecode(val);
-          if (decoded is Map) {
-            return decoded['is_active'] == true;
-          }
-        } catch (_) {}
-      }
-    }
-  } catch (_) {}
-  return false;
+  final val = await _localConfig(ref, 'donation_popup');
+  return val is Map && val['is_active'] == true;
 });

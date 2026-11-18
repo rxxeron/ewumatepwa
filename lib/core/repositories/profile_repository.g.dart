@@ -50,7 +50,7 @@ final class ProfileRepositoryProvider extends $FunctionalProvider<
   }
 }
 
-String _$profileRepositoryHash() => r'1ffed8b36307a5a183773215871a4f787be3cbda';
+String _$profileRepositoryHash() => r'c27b4ad3a14e284462b270227f8f2a4e13b9a2fb';
 
 @ProviderFor(userProfile)
 final userProfileProvider = UserProfileProvider._();
@@ -83,4 +83,4 @@ final class UserProfileProvider extends $FunctionalProvider<
   }
 }
 
-String _$userProfileHash() => r'fdffc6b3e819ddea9d6b41b672e205604ec956da';
+String _$userProfileHash() => r'91892e753d42f8e59d301e68093dc4701f2da66c';

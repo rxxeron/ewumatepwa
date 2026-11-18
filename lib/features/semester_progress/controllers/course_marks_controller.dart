@@ -345,9 +345,15 @@ class CourseMarksController {
 
     if (data['marks_data'] == null) data['marks_data'] = {};
     data['marks_data']['short_quiz_strategy'] = shortQuizStrategy;
+    
+    // SAFE MERGE: Preserve all existing marked dates and types so previous records are never erased
+    final existingAttendance = Map<String, dynamic>.from(data['marks_data']['attendance'] ?? {});
+    final existingDates = Map<String, dynamic>.from(existingAttendance['dates'] ?? {});
+    final existingTypes = Map<String, dynamic>.from(existingAttendance['types'] ?? {});
+
     data['marks_data']['attendance'] = {
-      'dates': markedDates,
-      'types': dateTypes,
+      'dates': <String, dynamic>{...existingDates, ...markedDates},
+      'types': <String, dynamic>{...existingTypes, ...dateTypes},
     };
     data['short_quiz_n'] = int.tryParse(shortQuizNCtrl.text) ?? 1;
 

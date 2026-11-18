@@ -211,7 +211,7 @@ class _AddTaskBottomSheetState extends ConsumerState<AddTaskBottomSheet> {
           type: selectedType,
           assignDate: assignedDate?.toUtc(),
           dueDate: finalDueDate?.toUtc(),
-          semesterCode: ref.read(currentSemesterCodeProvider).value ?? 'Spring2026',
+          semesterCode: ref.read(currentSemesterCodeProvider).value,
         );
         await taskRepo.updateTask(user!.id, updatedTask);
         ref.invalidate(allTasksStreamProvider);
@@ -233,7 +233,7 @@ class _AddTaskBottomSheetState extends ConsumerState<AddTaskBottomSheet> {
           type: selectedType,
           assignDate: assignedDate?.toUtc(),
           dueDate: finalDueDate?.toUtc(),
-          semesterCode: ref.read(currentSemesterCodeProvider).value ?? 'Spring2026',
+          semesterCode: ref.read(currentSemesterCodeProvider).value,
           isCompleted: false,
           createdAt: DateTime.now().toUtc(),
         );

@@ -103,8 +103,8 @@ class _CourseProgressDetailScreenState
           _isLoadingAttendance = false;
         });
 
-        // Silent auto-save if newly discovered session types changed
-        if (result.typesChanged) {
+        // Silent auto-save if newly discovered session types changed (never save an empty map which could clobber server data)
+        if (result.typesChanged && _markedDates.isNotEmpty) {
           _marksController.saveMarks(
             ref: ref,
             markedDates: _markedDates,

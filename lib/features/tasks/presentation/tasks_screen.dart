@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,7 +7,6 @@ import 'package:intl/intl.dart';
 import '../../../core/models/task.dart';
 import '../../../core/repositories/auth_repository.dart';
 import '../../../core/repositories/task_repository.dart';
-import '../../../core/services/cache_service.dart';
 import '../../../core/theme/ewu_theme_extension.dart';
 import '../../../core/utils/error_utils.dart';
 import '../../../core/widgets/ewumate_app_bar.dart';
@@ -16,6 +14,7 @@ import '../../../core/widgets/glass_kit.dart';
 import '../../../core/widgets/primitives/ewu_empty_state.dart';
 import '../../../core/widgets/onboarding_overlay.dart';
 import '../../../core/constants/onboarding_steps.dart';
+import '../../../core/utils/refresh_utils.dart';
 import 'widgets/add_task_bottom_sheet.dart';
 
 class TasksScreen extends ConsumerStatefulWidget {
@@ -27,7 +26,6 @@ class TasksScreen extends ConsumerStatefulWidget {
 
 class _TasksScreenState extends ConsumerState<TasksScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  Timer? _offlineHeartbeat;
 
   String _selectedCategory = 'All';
   final List<String> _categories = ['All', 'Quiz', 'Lab', 'Assignment', 'Project'];
@@ -37,14 +35,8 @@ class _TasksScreenState extends ConsumerState<TasksScreen> with SingleTickerProv
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-
-    // Heartbeat every 2 minutes
-    _offlineHeartbeat = Timer.periodic(const Duration(minutes: 2), (timer) {
-      if (mounted) {
-        ref.invalidate(allTasksStreamProvider);
-        _pushSyncQueue();
-      }
-    });
+    // No polling: the task list watches the local database, and queued edits are
+    // sent by the sync engine (on reconnect, resume and after each write).
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -57,51 +49,8 @@ class _TasksScreenState extends ConsumerState<TasksScreen> with SingleTickerProv
     });
   }
 
-  Future<void> _pushSyncQueue() async {
-    final user = ref.read(currentUserProvider);
-    if (user == null) return;
-    final cacheService = ref.read(cacheServiceProvider);
-    final taskRepo = ref.read(taskRepositoryProvider);
-
-    final queue = cacheService.getSyncQueue(user.id);
-    if (queue.isEmpty) return;
-
-    if (kDebugMode) debugPrint('[Offline Sync] Processing ${queue.length} items from tasks screen...');
-    bool anySuccess = false;
-
-    for (final item in queue) {
-      final action = item['action'];
-      try {
-        if (action == 'update_task_status') {
-          await taskRepo.updateTaskStatus(user.id, item['taskId'], item['isCompleted']);
-        } else if (action == 'delete_task') {
-          await taskRepo.deleteTask(user.id, item['taskId']);
-        } else if (action == 'create_task') {
-          await taskRepo.createTask(user.id, Task.fromJson(item['task']));
-        } else if (action == 'update_task') {
-          await taskRepo.updateTask(user.id, Task.fromJson(item['task']));
-        }
-
-        // Remove from queue after success
-        if (item.containsKey('taskId')) {
-          await cacheService.removeQueueItem(user.id, item['taskId']);
-        } else if (item.containsKey('task')) {
-          await cacheService.removeQueueItem(user.id, item['task']['id']);
-        }
-        anySuccess = true;
-      } catch (e) {
-        if (kDebugMode) debugPrint('[Offline Sync] Still offline for action $action');
-      }
-    }
-
-    if (anySuccess) {
-      ref.invalidate(allTasksStreamProvider);
-    }
-  }
-
   @override
   void dispose() {
-    _offlineHeartbeat?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -429,7 +378,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen> with SingleTickerProv
     return RefreshIndicator(
       onRefresh: () async {
         ref.invalidate(allTasksStreamProvider);
-        await _pushSyncQueue();
+        await RefreshUtils.syncNow(ref);
       },
       color: colors.primaryCyan,
       backgroundColor: colors.surfaceNavyBlue,
@@ -460,7 +409,7 @@ class _TasksScreenState extends ConsumerState<TasksScreen> with SingleTickerProv
     return RefreshIndicator(
       onRefresh: () async {
         ref.invalidate(allTasksStreamProvider);
-        await _pushSyncQueue();
+        await RefreshUtils.syncNow(ref);
       },
       color: colors.primaryCyan,
       backgroundColor: colors.surfaceNavyBlue,

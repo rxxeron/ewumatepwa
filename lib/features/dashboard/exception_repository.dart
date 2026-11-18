@@ -1,59 +1,49 @@
-import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
+import '../../core/data/db/app_database.dart';
+import '../../core/data/repos/local_writer.dart';
+import '../../core/data/sync/outbox.dart';
+
+/// Class cancellations, makeup and manual classes. Local-first: a change shows
+/// immediately (also offline) and is queued for the server; a server rejection
+/// is rolled back and listed under "Sync issues" instead of silently vanishing.
 class ExceptionRepository {
-  final SupabaseClient _supabase = Supabase.instance.client;
+  final AppDatabase _db;
+  ExceptionRepository([AppDatabase? db]) : _db = db ?? AppDatabase.main;
 
-  String? get _uid => _supabase.auth.currentUser?.id;
+  static const _table = 'schedule_exceptions';
 
-  static List<Map<String, dynamic>>? _cachedExceptions;
-  static DateTime? _cacheTime;
-  static const Duration _cacheTtl = Duration(minutes: 5);
+  String? get _uid => Supabase.instance.client.auth.currentUser?.id;
 
-  void invalidateCache() {
-    _cachedExceptions = null;
-    _cacheTime = null;
+  LocalWriter? get _writer {
+    final uid = _uid;
+    return uid == null ? null : LocalWriter(_db, Outbox(_db), uid);
   }
 
-  /// Fetch all active exceptions for the user for the current semester
+  /// Kept for API compatibility: local reads are always current.
+  void invalidateCache() {}
+
+  /// All of the user's exceptions.
   Future<List<Map<String, dynamic>>> fetchExceptions({bool forceRefresh = false}) async {
-    if (_uid == null) return [];
-    if (!forceRefresh && _cachedExceptions != null && _cacheTime != null && DateTime.now().difference(_cacheTime!) < _cacheTtl) {
-      return _cachedExceptions!;
-    }
-    try {
-      final data = await _supabase
-          .from('schedule_exceptions')
-          .select('id, user_id, type, date, course_code, course_name, start_time, end_time, room, faculty, metadata')
-          .eq('user_id', _uid!);
-      final list = List<Map<String, dynamic>>.from(data);
-      _cachedExceptions = list;
-      _cacheTime = DateTime.now();
-      return list;
-    } catch (e) {
-      if (kDebugMode) debugPrint('[ExceptionRepository] fetchExceptions error: $e');
-      return _cachedExceptions ?? [];
-    }
+    final uid = _uid;
+    if (uid == null) return [];
+    return (await _db.getRows(_table)).where((r) => r['user_id'] == uid).toList();
   }
 
-  /// Add a cancellation exception
-  Future<void> addCancellation(String date, String courseCode, {bool pendingMakeup = false}) async {
-    if (_uid == null) return;
-    try {
-      await _supabase.from('schedule_exceptions').insert({
-        'user_id': _uid,
+  Future<void> _insert(Map<String, dynamic> row, String label) async {
+    final w = _writer;
+    if (w == null) return;
+    await w.upsert(_table, {'id': const Uuid().v4(), 'user_id': w.userId, ...row}, label: label);
+  }
+
+  Future<void> addCancellation(String date, String courseCode, {bool pendingMakeup = false}) => _insert({
         'type': 'cancel',
         'date': date,
         'course_code': courseCode,
         'metadata': {'pendingMakeup': pendingMakeup},
-      });
-      invalidateCache();
-    } catch (e) {
-      if (kDebugMode) debugPrint('[ExceptionRepository] addCancellation error: $e');
-    }
-  }
+      }, 'Cancel $courseCode on $date');
 
-  /// Add a makeup class exception
   Future<void> addMakeupClass({
     required String date,
     required String courseCode,
@@ -62,11 +52,8 @@ class ExceptionRepository {
     required String endTime,
     required String room,
     String? faculty,
-  }) async {
-    if (_uid == null) return;
-    try {
-      await _supabase.from('schedule_exceptions').insert({
-        'user_id': _uid,
+  }) =>
+      _insert({
         'type': 'makeup',
         'date': date,
         'course_code': courseCode,
@@ -75,15 +62,9 @@ class ExceptionRepository {
         'end_time': endTime,
         'room': room,
         'faculty': faculty,
-        'metadata': {},
-      });
-      invalidateCache();
-    } catch (e) {
-      if (kDebugMode) debugPrint('[ExceptionRepository] addMakeupClass error: $e');
-    }
-  }
+        'metadata': <String, dynamic>{},
+      }, 'Makeup class $courseCode on $date');
 
-  /// Add a manual schedule entry
   Future<void> addManualClass({
     required String date,
     required String courseCode,
@@ -92,11 +73,8 @@ class ExceptionRepository {
     required String endTime,
     required String room,
     String? faculty,
-  }) async {
-    if (_uid == null) return;
-    try {
-      await _supabase.from('schedule_exceptions').insert({
-        'user_id': _uid,
+  }) =>
+      _insert({
         'type': 'manual',
         'date': date,
         'course_code': courseCode,
@@ -105,54 +83,26 @@ class ExceptionRepository {
         'end_time': endTime,
         'room': room,
         'faculty': faculty,
-        'metadata': {},
-      });
-      invalidateCache();
-    } catch (e) {
-      if (kDebugMode) debugPrint('[ExceptionRepository] addManualClass error: $e');
-    }
-  }
+        'metadata': <String, dynamic>{},
+      }, 'Class $courseCode on $date');
 
-  /// Mark a pending makeup as resolved (called when makeup is actually scheduled)
+  /// Mark a pending makeup as resolved (called when the makeup is actually scheduled).
   Future<void> resolvePendingMakeup(String originalExceptionId) async {
-    if (_uid == null) return;
-    try {
-      await _supabase.from('schedule_exceptions')
-          .update({ 'metadata': {'pendingMakeup': false} })
-          .eq('id', originalExceptionId);
-      invalidateCache();
-    } catch (e) {
-      if (kDebugMode) debugPrint('[ExceptionRepository] resolvePendingMakeup error: $e');
-    }
+    await _writer?.update(_table, originalExceptionId, {
+      'metadata': {'pendingMakeup': false}
+    }, label: 'Resolve makeup');
   }
 
-  /// Remove an exception completely (Undo cancel)
+  /// Remove an exception completely (undo cancel).
   Future<void> removeException(String id) async {
-    if (_uid == null) return;
-    try {
-      await _supabase.from('schedule_exceptions').delete().eq('id', id);
-      invalidateCache();
-    } catch (e) {
-      if (kDebugMode) debugPrint('[ExceptionRepository] removeException error: $e');
-    }
+    await _writer?.delete(_table, id, label: 'Undo class change');
   }
 
-  /// Find a specific exception ID
   Future<String?> findExceptionId(String date, String courseCode, String type) async {
-    if (_uid == null) return null;
-    try {
-      final data = await _supabase
-          .from('schedule_exceptions')
-          .select('id')
-          .eq('user_id', _uid!)
-          .eq('date', date)
-          .eq('course_code', courseCode)
-          .eq('type', type)
-          .maybeSingle();
-
-      return data?['id']?.toString();
-    } catch (e) {
-      return null;
-    }
+    final rows = await fetchExceptions();
+    return rows
+        .where((r) => r['date'] == date && r['course_code'] == courseCode && r['type'] == type)
+        .map((r) => r['id']?.toString())
+        .firstOrNull;
   }
 }

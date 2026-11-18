@@ -117,7 +117,7 @@ class GlassContainer extends StatelessWidget {
     this.height,
     this.padding = const EdgeInsets.all(16),
     this.margin,
-    this.blur = 10,
+    this.blur = 0, // was 10: backdrop blur per card was the main scroll cost
     this.opacity = 0.1,
     this.borderRadius = 20,
     this.borderColor,
@@ -134,9 +134,8 @@ class GlassContainer extends StatelessWidget {
       height: height,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(borderRadius),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-          child: Container(
+        // No BackdropFilter when not blurring: on web each one is an expensive layer.
+        child: _maybeBlur(Container(
             padding: padding,
             decoration: BoxDecoration(
               color: (color ?? Colors.white).withValues(alpha: opacity),
@@ -169,4 +168,8 @@ class GlassContainer extends StatelessWidget {
     }
     return content;
   }
+
+  Widget _maybeBlur(Widget surface) => blur > 0
+      ? BackdropFilter(filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur), child: surface)
+      : surface;
 }

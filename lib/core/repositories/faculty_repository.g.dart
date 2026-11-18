@@ -50,7 +50,7 @@ final class FacultyRepositoryProvider extends $FunctionalProvider<
   }
 }
 
-String _$facultyRepositoryHash() => r'2c3744fbac5b51891a5b123b94fcd795ef09ba34';
+String _$facultyRepositoryHash() => r'c5a9319ddbc27370aa77f6c2a5b2d7bc1a27149a';
 
 @ProviderFor(allFaculty)
 final allFacultyProvider = AllFacultyProvider._();

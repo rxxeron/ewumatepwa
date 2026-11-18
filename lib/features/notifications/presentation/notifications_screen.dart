@@ -32,11 +32,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
   @override
   void initState() {
     super.initState();
-    _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (mounted) {
-        ref.invalidate(userNotificationsProvider);
-      }
-    });
+    // No polling: notifications are local and update when the sync engine pulls.
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _checkPermission();

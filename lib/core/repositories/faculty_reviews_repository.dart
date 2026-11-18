@@ -2,9 +2,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/faculty_review.dart';
 import '../providers/supabase_provider.dart';
+import '../data/data_providers.dart';
+import '../data/db/app_database.dart';
+import '../data/sync/sync_signals.dart';
 
 final facultyReviewsRepositoryProvider = Provider<FacultyReviewsRepository>((ref) {
-  return FacultyReviewsRepository(ref.watch(supabaseClientProvider));
+  return FacultyReviewsRepository(ref.watch(supabaseClientProvider), ref.watch(appDatabaseProvider));
 });
 
 final allCoursesCatalogProvider = FutureProvider<List<Map<String, String>>>((ref) async {
@@ -17,138 +20,76 @@ final allSemestersListProvider = FutureProvider<List<Map<String, dynamic>>>((ref
   return repo.getAllSemesters();
 });
 
+/// Reading reviews is local (approved reviews: scope `reviews`; your own: scope
+/// `user`), so it works offline. Submitting/editing stays online-only.
 class FacultyReviewsRepository {
   final SupabaseClient _supabase;
+  final AppDatabase _db;
 
-  FacultyReviewsRepository(this._supabase);
+  FacultyReviewsRepository(this._supabase, this._db);
 
-  // Fetch all courses for relational picker dropdown
+  static List<FacultyReview> _parse(Iterable<Map<String, dynamic>> rows) {
+    final out = <FacultyReview>[];
+    for (final r in rows) {
+      try {
+        out.add(FacultyReview.fromMap(r));
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  // Course picker (local catalog)
   Future<List<Map<String, String>>> getAllCourses() async {
-    try {
-      final res = await _supabase
-          .from('course_metadata')
-          .select('code, name')
-          .order('code', ascending: true)
-          .limit(2000);
-      return (res as List).map((e) {
-        return {
-          'code': (e['code'] ?? '').toString().toUpperCase(),
-          'name': (e['name'] ?? '').toString(),
-        };
-      }).toList();
-    } catch (e) {
-      return [];
-    }
+    final rows = await _db.getRows('course_metadata');
+    final list = rows
+        .map((e) => {'code': '${e['code'] ?? ''}'.toUpperCase(), 'name': '${e['name'] ?? ''}'})
+        .toList()
+      ..sort((a, b) => a['code']!.compareTo(b['code']!));
+    return list;
   }
 
-  // Fetch all semesters for relational picker dropdown
+  // Semester picker (local semesters, newest first)
   Future<List<Map<String, dynamic>>> getAllSemesters() async {
-    try {
-      final res = await _supabase
-          .from('semesters')
-          .select('code, title, is_active')
-          .order('portal_semester_id', ascending: false);
-      return (res as List).map((e) {
-        return {
-          'code': (e['code'] ?? '').toString(),
-          'title': (e['title'] ?? '').toString(),
-          'is_active': e['is_active'] == true,
-        };
-      }).toList();
-    } catch (e) {
-      return [];
-    }
+    final rows = await _db.getRows('semesters')
+      ..sort((a, b) => ((b['portal_semester_id'] as num?) ?? 0).compareTo((a['portal_semester_id'] as num?) ?? 0));
+    return rows
+        .map((e) => {'code': '${e['code'] ?? ''}', 'title': '${e['title'] ?? ''}', 'is_active': e['is_active'] == true})
+        .toList();
   }
 
-  // Fetch all approved reviews for a specific faculty member
+  // All approved reviews for a faculty member
   Future<List<FacultyReview>> getApprovedReviews(String initials) async {
-    try {
-      final normalized = initials.trim().toUpperCase();
-      final data = await _supabase
-          .from('faculty_reviews')
-          .select('''
-            id,
-            faculty_initials,
-            faculty_name,
-            course_code,
-            semester,
-            semester_code,
-            status,
-            delivery_type,
-            grade_received,
-            clarity_rating,
-            grading_fairness,
-            exam_alignment,
-            office_hours_accessibility,
-            attendance_strictness,
-            workload_level,
-            slide_reliance,
-            quiz_frequency,
-            textbook_need,
-            traits,
-            exam_prep_tips,
-            review_note,
-            would_take_again,
-            created_at,
-            updated_at
-          ''')
-          .eq('status', 'approved')
-          .ilike('faculty_initials', normalized)
-          .order('created_at', ascending: false);
-
-      return (data as List).map((e) => FacultyReview.fromMap(e)).toList();
-    } catch (e) {
-      return [];
-    }
+    final normalized = initials.trim().toUpperCase();
+    final rows = (await _db.getRows('faculty_reviews'))
+        .where((r) => r['status'] == 'approved' && '${r['faculty_initials']}'.trim().toUpperCase() == normalized)
+        .toList()
+      ..sort((a, b) => '${b['created_at']}'.compareTo('${a['created_at']}'));
+    return _parse(rows);
   }
 
-  // Fetch current user's review for this faculty and course (if any)
-  Future<FacultyReview?> getUserReview({
-    required String initials,
-    required String courseCode,
-  }) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return null;
-
-    try {
-      final normalizedInitials = initials.trim().toUpperCase();
-      final normalizedCourse = courseCode.trim().toUpperCase();
-
-      final data = await _supabase
-          .from('faculty_reviews')
-          .select()
-          .eq('user_id', user.id)
-          .ilike('faculty_initials', normalizedInitials)
-          .ilike('course_code', normalizedCourse)
-          .maybeSingle();
-
-      if (data == null) return null;
-      return FacultyReview.fromMap(data);
-    } catch (e) {
-      return null;
-    }
+  Future<List<Map<String, dynamic>>> _myRows() async {
+    final uid = _supabase.auth.currentUser?.id;
+    if (uid == null) return const [];
+    return (await _db.getRows('my_faculty_reviews')).where((r) => r['user_id'] == uid).toList();
   }
 
-  // Fetch all of current user's reviews for this faculty member
+  // Current user's review for this faculty and course (if any)
+  Future<FacultyReview?> getUserReview({required String initials, required String courseCode}) async {
+    final i = initials.trim().toUpperCase();
+    final c = courseCode.trim().toUpperCase();
+    final row = (await _myRows())
+        .where((r) => '${r['faculty_initials']}'.trim().toUpperCase() == i && '${r['course_code']}'.trim().toUpperCase() == c)
+        .firstOrNull;
+    return row == null ? null : _parse([row]).firstOrNull;
+  }
+
+  // All of the current user's reviews for this faculty member
   Future<List<FacultyReview>> getUserReviewsForFaculty(String initials) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return [];
-
-    try {
-      final normalizedInitials = initials.trim().toUpperCase();
-      final data = await _supabase
-          .from('faculty_reviews')
-          .select()
-          .eq('user_id', user.id)
-          .ilike('faculty_initials', normalizedInitials)
-          .order('created_at', ascending: false);
-
-      return (data as List).map((e) => FacultyReview.fromMap(e)).toList();
-    } catch (e) {
-      return [];
-    }
+    final i = initials.trim().toUpperCase();
+    final rows = (await _myRows()).where((r) => '${r['faculty_initials']}'.trim().toUpperCase() == i).toList()
+      ..sort((a, b) => '${b['created_at']}'.compareTo('${a['created_at']}'));
+    return _parse(rows);
   }
-
   // Submit a new faculty review or update existing one
   Future<void> submitReview(FacultyReview review) async {
     final user = _supabase.auth.currentUser;
@@ -198,6 +139,7 @@ class FacultyReviewsRepository {
           data,
           onConflict: 'user_id,faculty_initials,course_code',
         );
+    SyncSignals.instance.request(reason: 'review submitted');
   }
 
   // Edit and resubmit a review (resets status to pending and clears rejection note)
@@ -216,6 +158,7 @@ class FacultyReviewsRepository {
         .update(data)
         .eq('id', review.id)
         .eq('user_id', user.id);
+    SyncSignals.instance.request(reason: 'review resubmitted');
   }
 
   // Delete own review
@@ -228,5 +171,6 @@ class FacultyReviewsRepository {
         .delete()
         .eq('id', reviewId)
         .eq('user_id', user.id);
+    SyncSignals.instance.request(reason: 'review deleted');
   }
 }

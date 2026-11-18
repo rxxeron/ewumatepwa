@@ -1,136 +1,87 @@
 import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../data/data_providers.dart';
+import '../data/db/app_database.dart';
+import '../data/sync/scope_catalog.dart';
 import '../models/course_metadata.dart';
 import '../models/course_section.dart';
 import '../providers/supabase_provider.dart';
-import '../services/cache_service.dart';
-import '../services/redis_service.dart';
 import '../utils/course_utils.dart';
 
 part 'course_repository.g.dart';
 
+/// Course catalog and sections. The current/next semester sections and the
+/// catalog are synced to the local database, so browsing and search work
+/// offline. Semesters the device does not keep (older ones) are read from the
+/// server on demand, as before.
 class CourseRepository {
   final SupabaseClient _supabase;
-  final CacheService _cache;
-  final RedisService _redis;
-  final Map<String, List<Map<String, dynamic>>> _memorySemesterSections = {};
+  final AppDatabase _db;
 
-  CourseRepository(this._supabase, this._cache, this._redis);
+  CourseRepository(this._supabase, this._db);
 
-  Future<List<CourseMetadata>> getAllCourses({int offset = 0, int limit = 3000}) async {
-    // 1. Try local cache first (L1)
-    final cached = _cache.getMapData('course_catalog', 'full_list');
-    if (cached != null && cached['data'] != null) {
-      final updatedAtStr = cached['updated_at'] as String?;
-      bool isStale = true;
-      if (updatedAtStr != null) {
-        final updatedAt = DateTime.tryParse(updatedAtStr);
-        if (updatedAt != null && DateTime.now().difference(updatedAt).inDays < 7) {
-          isStale = false;
-        }
-      }
-      if (isStale) {
-        _fetchAllAndCache(offset, limit);
-      }
-      final list = (cached['data'] as List).map((e) => CourseMetadata.fromJson(e)).toList();
-      CourseUtils.registerTitles({for (var c in list) c.code: c.name});
-      return list;
+  static List<CourseMetadata> _parseMeta(Iterable<Map<String, dynamic>> rows) {
+    final out = <CourseMetadata>[];
+    for (final r in rows) {
+      try {
+        out.add(CourseMetadata.fromJson(r));
+      } catch (_) {}
     }
-
-    return await _fetchAllAndCache(offset, limit);
+    out.sort((a, b) => a.code.compareTo(b.code));
+    return out;
   }
 
-  Future<List<CourseMetadata>> _fetchAllAndCache(int offset, int limit) async {
-    // 2. Try Redis cache (L2)
-    try {
-      final redisList = await _redis.getList('global:course_metadata');
-      if (redisList != null && redisList.isNotEmpty) {
-        final results = redisList.map((e) => CourseMetadata.fromJson(Map<String, dynamic>.from(e))).toList();
-        CourseUtils.registerTitles({for (var c in results) c.code: c.name});
-        _cache.setMapData('course_catalog', 'full_list', {
-          'data': results.map((e) => e.toJson()).toList(),
-          'updated_at': DateTime.now().toIso8601String(),
-        });
-        return results;
-      }
-    } catch (e) {
-      if (kDebugMode) print('Redis course_metadata lookup failed: $e');
-    }
+  Future<List<CourseMetadata>> getAllCourses({int offset = 0, int limit = 3000}) async {
+    var list = _parseMeta(await _db.getRows('course_metadata'));
+    if (list.isEmpty) list = await _fetchAllRemote(limit);
+    CourseUtils.registerTitles({for (final c in list) c.code: c.name});
+    return list.skip(offset).take(limit).toList();
+  }
 
-    // 3. Fallback to Supabase Postgres (L3)
-    List<CourseMetadata> allResults = [];
+  /// First launch only (catalog not synced yet).
+  Future<List<CourseMetadata>> _fetchAllRemote(int limit) async {
+    final all = <CourseMetadata>[];
     try {
-      int currentOffset = offset;
-      const int pageSize = 1000;
-      
-      while (allResults.length < limit) {
-        final remaining = limit - allResults.length;
-        final fetchSize = remaining < pageSize ? remaining : pageSize;
-        
+      var offset = 0;
+      const page = 1000;
+      while (all.length < limit) {
         final data = await _supabase
             .from('course_metadata')
             .select()
             .order('code', ascending: true)
-            .range(currentOffset, currentOffset + fetchSize - 1);
-
-        final List<dynamic> list = data as List;
+            .range(offset, offset + page - 1);
+        final list = data as List;
         if (list.isEmpty) break;
-
-        allResults.addAll(list.map((e) => CourseMetadata.fromJson(e)));
-        currentOffset += list.length;
-        if (list.length < fetchSize) break;
+        all.addAll(_parseMeta(list.map((e) => Map<String, dynamic>.from(e as Map))));
+        offset += list.length;
+        if (list.length < page) break;
       }
-
-      // Update Local Cache
-      _cache.setMapData('course_catalog', 'full_list', {
-        'data': allResults.map((e) => e.toJson()).toList(),
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-
-      // Populate Redis L2 Cache asynchronously with 7-day TTL
-      _redis.set(
-        'global:course_metadata',
-        allResults.map((e) => e.toJson()).toList(),
-        ttl: const Duration(days: 7),
-      );
-
-      CourseUtils.registerTitles({for (var c in allResults) c.code: c.name});
-      return allResults;
     } catch (e) {
-      if (kDebugMode) print('Failed to load courses from network: $e');
-      // If we managed to fetch partial results, return them instead of discarding
-      CourseUtils.registerTitles({for (var c in allResults) c.code: c.name});
-      return allResults;
+      if (kDebugMode) debugPrint('[CourseRepository] catalog fetch failed: $e');
     }
+    return all;
   }
 
+  /// Offline search: code prefix/contains first, then name.
   Future<List<CourseMetadata>> searchCourses(String query) async {
-    if (query.isEmpty) return getAllCourses();
+    final all = await getAllCourses();
+    if (query.isEmpty) return all;
+    final q = query.replaceAll(' ', '').toUpperCase();
+    final byCode = all.where((c) => c.code.replaceAll(' ', '').toUpperCase().contains(q)).toList()
+      ..sort((a, b) {
+        final ap = a.code.toUpperCase().startsWith(q) ? 0 : 1;
+        final bp = b.code.toUpperCase().startsWith(q) ? 0 : 1;
+        return ap != bp ? ap - bp : a.code.compareTo(b.code);
+      });
+    if (byCode.isNotEmpty) return byCode;
+    final lower = query.toLowerCase();
+    return all.where((c) => c.name.toLowerCase().contains(lower)).toList();
+  }
 
-    try {
-      final data = await _supabase
-          .from('course_metadata')
-          .select()
-          .textSearch('code', "$query:*")
-          .order('code', ascending: true);
-
-      if ((data as List).isEmpty) {
-        // Fallback to name search
-        final nameData = await _supabase
-            .from('course_metadata')
-            .select()
-            .ilike('name', "%$query%")
-            .order('code', ascending: true);
-        return (nameData as List)
-            .map((e) => CourseMetadata.fromJson(e))
-            .toList();
-      }
-
-      return data.map((e) => CourseMetadata.fromJson(e)).toList();
-    } catch (e) {
-      throw Exception('Failed to search courses: $e');
-    }
+  Future<List<Map<String, dynamic>>> _semesterRows(String semesterCode) async {
+    final sem = normSemester(semesterCode);
+    return _db.getRows('courses_$sem');
   }
 
   Future<List<CourseSection>> getCourseSections(
@@ -138,71 +89,37 @@ class CourseRepository {
     String courseCode, {
     String? cycleType,
   }) async {
-    // Basic formatting from original app -> "Spring 2026" / "spring_2026" -> "spring2026"
-    final safeSem = semesterCode
-        .toLowerCase()
-        .replaceAll(' ', '')
-        .replaceAll('_', '');
-    final tableName = 'courses_$safeSem';
+    final sem = normSemester(semesterCode);
+    final base = courseCode.replaceAll(' ', '').toUpperCase();
+    String alt = '';
+    final reg3 = RegExp(r'^([A-Z]{2,4})(\d{3})$');
+    final reg4 = RegExp(r'^([A-Z]{2,4})7(\d{3})$');
+    if (reg3.hasMatch(base)) {
+      final m = reg3.firstMatch(base)!;
+      alt = '${m.group(1)}7${m.group(2)}';
+    } else if (reg4.hasMatch(base)) {
+      final m = reg4.firstMatch(base)!;
+      alt = '${m.group(1)}${m.group(2)}';
+    }
 
+    final local = await _semesterRows(sem);
+    if (local.isNotEmpty) {
+      final matched = local.where((e) {
+        final c = '${e['course_code'] ?? ''}'.toUpperCase().replaceAll(' ', '');
+        return c == base || (alt.isNotEmpty && c == alt) || c.contains(base);
+      });
+      return matched.map((e) => _mapToCourseSection(Map<String, dynamic>.from(e))).toList();
+    }
+
+    // Semester not kept on this device: read from the server (online only).
     try {
-      final String base = courseCode.replaceAll(' ', '').toUpperCase();
-      String alt = '';
-      
-      // Heuristic: ACT101 <-> ACT7101
-      final reg3 = RegExp(r'^([A-Z]{2,4})(\d{3})$');
-      final reg4 = RegExp(r'^([A-Z]{2,4})7(\d{3})$');
-      
-      if (reg3.hasMatch(base)) {
-        final match = reg3.firstMatch(base)!;
-        alt = '${match.group(1)}7${match.group(2)}';
-      } else if (reg4.hasMatch(base)) {
-        final match = reg4.firstMatch(base)!;
-        alt = '${match.group(1)}${match.group(2)}';
-      }
-
-      // Check Redis cache for full semester course sections if available
-      try {
-        List<Map<String, dynamic>>? semesterData = _memorySemesterSections[safeSem];
-        if (semesterData == null) {
-          final redisCourses = await _redis.getList('global:courses:$safeSem');
-          if (redisCourses != null && redisCourses.isNotEmpty) {
-            semesterData = redisCourses.map((e) => Map<String, dynamic>.from(e)).toList();
-            if (_memorySemesterSections.length >= 3) {
-              _memorySemesterSections.remove(_memorySemesterSections.keys.first);
-            }
-            _memorySemesterSections[safeSem] = semesterData;
-          }
-        }
-
-        if (semesterData != null && semesterData.isNotEmpty) {
-          final matched = semesterData.where((e) {
-            final cCode = (e['course_code'] ?? '').toString().toUpperCase().replaceAll(' ', '');
-            if (cCode == base || (alt.isNotEmpty && cCode == alt)) return true;
-            return cCode.contains(base);
-          }).toList();
-
-          if (matched.isNotEmpty) {
-            return matched.map((e) => _mapToCourseSection(Map<String, dynamic>.from(e))).toList();
-          }
-        }
-      } catch (e) {
-        if (kDebugMode) print('Redis section lookup error: $e');
-      }
-
-      final String fuzzyBase = base.split('').join('%');
-      final String orClause = alt.isNotEmpty 
+      final fuzzyBase = base.split('').join('%');
+      final orClause = alt.isNotEmpty
           ? 'course_code.ilike.%$fuzzyBase%,course_code.ilike.%${alt.split('').join('%')}%'
           : 'course_code.ilike.%$fuzzyBase%';
-
-      final data = await _supabase
-          .from(tableName)
-          .select()
-          .or(orClause);
-
+      final data = await _supabase.from('courses_$sem').select().or(orClause);
       return (data as List).map((e) => _mapToCourseSection(Map<String, dynamic>.from(e))).toList();
     } catch (e) {
-      // Legacy app returned empty list on missing table/error
       return [];
     }
   }
@@ -217,147 +134,60 @@ class CourseRepository {
       sessionMap['end_time'] = sessionMap['endTime'] ?? sessionMap['end_time'];
       return sessionMap;
     }).toList();
-    
     map['capacity'] = map['capacity']?.toString() ?? '0/0';
     map['credits'] = map['credit_val']?.toString() ?? '3.0';
     return CourseSection.fromJson(map);
   }
 
-  Future<List<CourseMetadata>> getSemesterCourses(String semesterCode) async {
-    final cacheKey = 'sem_${semesterCode.toLowerCase()}';
-    
-    int? serverVersion;
-    try {
-      final configRes = await _supabase
-          .from('app_config')
-          .select('value')
-          .eq('key', 'catalog_cache_version')
-          .maybeSingle();
-      if (configRes != null && configRes['value'] != null) {
-        serverVersion = (configRes['value']['version'] as num?)?.toInt();
-      }
-    } catch (_) {}
-
-    final cached = _cache.getMapData('course_catalog', cacheKey);
-    if (cached != null && cached['data'] != null && (cached['data'] as List).isNotEmpty) {
-      final cachedVersion = (cached['version'] as num?)?.toInt() ?? 0;
-      if (serverVersion != null && serverVersion > cachedVersion) {
-        return await _fetchSemesterAndCache(semesterCode, cacheKey, serverVersion: serverVersion);
-      }
-
-      final updatedAtStr = cached['updated_at'] as String?;
-      bool isStale = true;
-      if (updatedAtStr != null) {
-        final updatedAt = DateTime.tryParse(updatedAtStr);
-        if (updatedAt != null && DateTime.now().difference(updatedAt).inDays < 7) {
-          isStale = false;
-        }
-      }
-      if (isStale) {
-        // Trigger background sync if cache is older than 7 days
-        _fetchSemesterAndCache(semesterCode, cacheKey, serverVersion: serverVersion);
-      }
-      final list = (cached['data'] as List).map((e) => CourseMetadata.fromJson(e)).toList();
-      CourseUtils.registerTitles({for (var c in list) c.code: c.name});
-      return list;
+  static List<CourseMetadata> _uniqueCourses(Iterable<Map<String, dynamic>> rows) {
+    final unique = <String, CourseMetadata>{};
+    for (final e in rows) {
+      final code = '${e['course_code'] ?? ''}';
+      if (code.isEmpty || unique.containsKey(code)) continue;
+      unique[code] = CourseMetadata(
+        code: code,
+        name: '${e['course_name'] ?? e['name'] ?? 'Unknown'}',
+        creditVal: (e['credit_val'] as num?)?.toDouble() ?? 3.0,
+      );
     }
-
-    return await _fetchSemesterAndCache(semesterCode, cacheKey, serverVersion: serverVersion);
+    return unique.values.toList()..sort((a, b) => a.code.compareTo(b.code));
   }
 
-  Future<List<CourseMetadata>> _fetchSemesterAndCache(String semesterCode, String cacheKey, {int? serverVersion}) async {
-    final safeSem = semesterCode
-        .toLowerCase()
-        .replaceAll(' ', '')
-        .replaceAll('_', '');
+  Future<List<CourseMetadata>> getSemesterCourses(String semesterCode) async {
+    final local = await _semesterRows(semesterCode);
+    final list = local.isNotEmpty ? _uniqueCourses(local) : await _fetchSemesterRemote(semesterCode);
+    CourseUtils.registerTitles({for (final c in list) c.code: c.name});
+    return list;
+  }
 
-    // Check Redis for full semester course list first
+  Future<List<CourseMetadata>> _fetchSemesterRemote(String semesterCode) async {
+    final table = 'courses_${normSemester(semesterCode)}';
+    final rows = <Map<String, dynamic>>[];
     try {
-      final redisCourses = await _redis.getList('global:courses:$safeSem');
-      if (redisCourses != null && redisCourses.isNotEmpty) {
-        final Map<String, CourseMetadata> unique = {};
-        for (final e in redisCourses) {
-          final code = (e['course_code'] ?? '').toString();
-          if (code.isEmpty || unique.containsKey(code)) continue;
-          unique[code] = CourseMetadata(
-            code: code,
-            name: (e['course_name'] ?? e['name'] ?? 'Unknown').toString(),
-            creditVal: (e['credit_val'] as num?)?.toDouble() ?? 3.0,
-          );
-        }
-        final results = unique.values.toList();
-        if (results.isNotEmpty) {
-          _cache.setMapData('course_catalog', cacheKey, {
-            'data': results.map((e) => e.toJson()).toList(),
-            'updated_at': DateTime.now().toIso8601String(),
-            'version': serverVersion ?? 0,
-          });
-          return results;
-        }
-      }
-    } catch (e) {
-      if (kDebugMode) print('Redis semester courses lookup error: $e');
-    }
-
-    final tableName = 'courses_$safeSem';
-
-    try {
-      int currentOffset = 0;
-      const int pageSize = 1000;
-      const int limit = 20000;
-      final Map<String, CourseMetadata> unique = {};
-
-      while (currentOffset < limit) {
+      var offset = 0;
+      const page = 1000;
+      while (offset < 20000) {
         final res = await _supabase
-            .from(tableName)
+            .from(table)
             .select('course_code, course_name, credit_val')
             .order('course_code', ascending: true)
-            .range(currentOffset, currentOffset + pageSize - 1);
-        
+            .range(offset, offset + page - 1);
         final list = res as List;
         if (list.isEmpty) break;
-
-        for (final e in list) {
-          final code = (e['course_code'] ?? '').toString();
-          if (code.isEmpty || unique.containsKey(code)) continue;
-          
-          unique[code] = CourseMetadata(
-            code: code,
-            name: (e['course_name'] ?? e['name'] ?? 'Unknown').toString(),
-            creditVal: (e['credit_val'] as num?)?.toDouble() ?? 3.0,
-          );
-        }
-        
-        currentOffset += list.length;
-        if (list.length < pageSize) break;
+        rows.addAll(list.map((e) => Map<String, dynamic>.from(e as Map)));
+        offset += list.length;
+        if (list.length < page) break;
       }
-      
-      final results = unique.values.toList();
-
-      // Only cache non-empty results to prevent caching bad/corrupt table loads
-      if (results.isNotEmpty) {
-        _cache.setMapData('course_catalog', cacheKey, {
-          'data': results.map((e) => e.toJson()).toList(),
-          'updated_at': DateTime.now().toIso8601String(),
-          'version': serverVersion ?? 0,
-        });
-      }
-
-      return results;
     } catch (e) {
-      if (kDebugMode) print('Database Error in getSemesterCourses: $e');
-      return [];
+      if (kDebugMode) debugPrint('[CourseRepository] $table fetch failed: $e');
     }
+    return _uniqueCourses(rows);
   }
 }
 
 @riverpod
 CourseRepository courseRepository(Ref ref) {
-  return CourseRepository(
-    ref.watch(supabaseClientProvider),
-    ref.watch(cacheServiceProvider),
-    ref.watch(redisServiceProvider),
-  );
+  return CourseRepository(ref.watch(supabaseClientProvider), ref.watch(appDatabaseProvider));
 }
 
 @riverpod
@@ -376,7 +206,5 @@ Future<List<CourseSection>> courseSections(
   required String semesterCode,
   required String courseCode,
 }) {
-  return ref
-      .watch(courseRepositoryProvider)
-      .getCourseSections(semesterCode, courseCode);
+  return ref.watch(courseRepositoryProvider).getCourseSections(semesterCode, courseCode);
 }

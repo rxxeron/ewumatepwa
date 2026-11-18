@@ -1,172 +1,86 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/models/profile.dart';
-import '../../core/services/cache_service.dart';
-import '../../core/repositories/auth_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-final profileProvider = StreamProvider<Profile?>((ref) async* {
-  final authRepo = ref.watch(authRepositoryProvider);
-  final user = authRepo.currentUser;
-  final cacheService = ref.read(cacheServiceProvider);
+import '../../core/data/data_providers.dart';
+import '../../core/data/repos/local_writer.dart';
+import '../../core/data/sync/scope_catalog.dart';
+import '../../core/models/profile.dart';
+import '../../core/utils/course_utils.dart';
 
-  String? effectiveUserId = user?.id;
-  if (effectiveUserId == null) {
-    effectiveUserId = cacheService.getLastUserId();
-    if (effectiveUserId == null) {
-      yield null;
-      return;
-    }
-  }
-  
-  final userId = effectiveUserId;
-
-  // 1. Yield Cache Immediately (Frame 1)
-  final cachedData = cacheService.getCachedProfile(userId);
-  if (cachedData != null) {
-    debugPrint("[ProfileProvider] Serving Cache instantly on Frame 1...");
-    yield Profile.fromJson(cachedData);
-  }
-
-  // 2. Background fetch for online updates
-  int retryCount = 0;
-  while (retryCount < 3) {
+/// The signed-in user's profile, from the local database (offline-first).
+/// Emits null while signed out, and also before the very first sync of a new
+/// device — use [userDataReadyProvider] to tell "not downloaded yet" from "no profile".
+final profileProvider = StreamProvider<Profile?>((ref) {
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return Stream.value(null);
+  return ref.watch(appDatabaseProvider).watchRow('profiles', uid).map((j) {
+    if (j == null) return null;
     try {
-      debugPrint("[ProfileProvider] Attempting Online Fetch for: $userId");
-      var profile = await authRepo.getProfile(userId).timeout(
-        const Duration(seconds: 10),
-      );
-      
-      if (profile == null && user != null) {
-        // Attempt to auto-create profile if missing (e.g. fresh OAuth login)
-        await authRepo.ensureProfileExists(user);
-        profile = await authRepo.getProfile(userId).timeout(
-          const Duration(seconds: 5),
-        );
-      }
-
-      if (profile != null) {
-        cacheService.cacheProfile(userId, profile.toJson());
-        yield profile;
-        return; 
-      } else {
-        // Profile genuinely not found in DB
-        yield null;
-        return;
-      }
+      return Profile.fromJson(j);
     } catch (e) {
-      debugPrint("[ProfileProvider] Online failed: $e");
-      retryCount++;
-      if (retryCount >= 3) {
-        if (cachedData == null) {
-          yield null;
-        }
-        return;
-      }
-      // Retry after brief delay
-      await Future.delayed(const Duration(seconds: 2));
+      if (kDebugMode) debugPrint('[profileProvider] bad local profile row: $e');
+      return null;
     }
-  }
+  });
+});
+
+/// True once the user's own data has been downloaded at least once on this
+/// device (or imported from the previous app version's cache).
+final userDataReadyProvider = StreamProvider<bool>((ref) {
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return Stream.value(false);
+  final db = ref.watch(appDatabaseProvider);
+  final scope = ScopeCatalog.userScope(uid);
+  return (db.select(db.syncScopes)..where((t) => t.scope.equals(scope)))
+      .watchSingleOrNull()
+      .map((s) => s?.cursor != null);
 });
 
 final authStateProvider = StreamProvider<AuthState>((ref) async* {
   final client = Supabase.instance.client;
-  // Tracing log removed for release
-  
-  // 1. Emit the current session immediately
-  final initialSession = client.auth.currentSession;
-  yield AuthState(AuthChangeEvent.initialSession, initialSession);
-
-  // 2. Then pipe all future auth changes
+  yield AuthState(AuthChangeEvent.initialSession, client.auth.currentSession);
   yield* client.auth.onAuthStateChange;
 });
 
-final requiresGradeEntryProvider = StreamProvider<bool>((ref) async* {
-  final user = ref.watch(authRepositoryProvider).currentUser;
-  if (user == null) {
-    yield false;
-    return;
-  }
+/// Must the student submit grades before using the app? Computed from local
+/// enrollments + active semester, so it is instant and works offline.
+final requiresGradeEntryProvider = FutureProvider<bool>((ref) async {
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return false;
 
-  final cacheService = ref.read(cacheServiceProvider);
-  final client = Supabase.instance.client;
+  final profile = await ref.watch(profileProvider.future);
+  if (profile == null) return false;
+  final semesters = await ref.watch(localRowsProvider(('active_semester', null)).future);
+  final enrollments = await ref.watch(localRowsProvider(('enrollments', null)).future);
 
-  // Watch the provider future before yielding anything (fixes Riverpod StateError)
-  final profileFuture = ref.watch(profileProvider.future);
-
-  // 1. Emit cached decision instantly (Frame 1)
-  final cached = cacheService.getMapData('profile_box', '${user.id}_requires_grade_entry');
-  if (cached != null) {
-    yield cached['requires'] as bool? ?? false;
-  } else {
-    yield false;
-  }
-
-  // 2. Fetch fresh decision online
-  try {
-    final profile = await profileFuture;
-    if (profile == null) {
-      yield false;
-      return;
-    }
-
-    // NORMALIZE: Map 'tri' -> 'tri_semester' to match DB Enum constraints
-    String track = profile.track ?? profile.semesterType;
-    if (track == 'tri') track = 'tri_semester';
-    if (track == 'bi') track = 'bi_semester';
-
-    // Fetch active semester and unsubmitted enrollments concurrently
-    final results = await Future.wait([
-      client.from('active_semester')
-          .select()
-          .eq('track', track)
-          .limit(1)
-          .maybeSingle()
-          .timeout(const Duration(seconds: 10)),
-      client.from('enrollments')
-          .select('id, semester_code, grade')
-          .eq('user_id', user.id)
-          .eq('status', 'enrolled')
-          .isFilter('grade', null)
-          .timeout(const Duration(seconds: 10))
-          .catchError((e) => <Map<String, dynamic>>[]),
-    ]);
-
-    final activeSemRes = results[0] as Map<String, dynamic>?;
-    final unsubmittedEnrollments = List<Map<String, dynamic>>.from(results[1] as List? ?? []);
-
-    if (activeSemRes == null) {
-      yield false;
-      return;
-    }
-
-    final activeCode = activeSemRes['current_semester_code'];
-    bool requiresGrade = false;
-
-    // Check past unsubmitted courses
-    final hasPastHanging = unsubmittedEnrollments.any((e) => e['semester_code'] != activeCode);
-    if (hasPastHanging) {
-      requiresGrade = true;
-    } else {
-      // Check current semester hand-off
-      final submissionStartStr = activeSemRes['grade_submission_start'];
-      if (submissionStartStr != null) {
-        final submissionStart = DateTime.tryParse(submissionStartStr.toString());
-        if (submissionStart != null && DateTime.now().isAfter(submissionStart.add(const Duration(days: 1)))) {
-          final hasCurrentUnsubmitted = unsubmittedEnrollments.any((e) => e['semester_code'] == activeCode);
-          if (hasCurrentUnsubmitted) {
-            requiresGrade = true;
-          }
-        }
-      }
-    }
-
-    // Cache the fresh decision
-    await cacheService.setMapData('profile_box', '${user.id}_requires_grade_entry', {'requires': requiresGrade});
-    yield requiresGrade;
-  } catch (e) {
-    if (kDebugMode) print("DEBUG: Grade entry check failed: $e");
-    // Fall back to cached value, already yielded
-  }
+  return computeRequiresGradeEntry(
+    track: CourseUtils.normalizeTrack(profile.track ?? profile.semesterType),
+    activeSemesters: semesters,
+    enrollments: enrollments,
+    now: DateTime.now(),
+  );
 });
+
+/// Same rule as the previous online check, on local rows. Semester codes are
+/// compared in canonical form ("Fall 2026" == "fall2026").
+@visibleForTesting
+bool computeRequiresGradeEntry({
+  required String track,
+  required List<Map<String, dynamic>> activeSemesters,
+  required List<Map<String, dynamic>> enrollments,
+  required DateTime now,
+}) {
+  final active = activeSemesters.where((r) => r['track'] == track).firstOrNull;
+  if (active == null) return false;
+  final activeCode = normSemester(active['current_semester_code'] as String?);
+
+  final unsubmitted = enrollments.where((e) => e['status'] == 'enrolled' && e['grade'] == null).toList();
+  if (unsubmitted.any((e) => normSemester(e['semester_code'] as String?) != activeCode)) return true;
+
+  final start = DateTime.tryParse('${active['grade_submission_start']}');
+  if (start != null && now.isAfter(start.add(const Duration(days: 1)))) {
+    return unsubmitted.any((e) => normSemester(e['semester_code'] as String?) == activeCode);
+  }
+  return false;
+}

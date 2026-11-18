@@ -37,12 +37,7 @@ class _AdvisingScreenState extends ConsumerState<AdvisingScreen>
     _tabController = TabController(length: 3, vsync: this);
     _updateProtectionForTab(_tabController.index);
     _tabController.addListener(_handleTabChanged);
-    _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (mounted) {
-        ref.invalidate(activeSemesterProvider);
-        ref.invalidate(availableAdvisingCoursesProvider);
-      }
-    });
+    // No polling: this screen's data is local and updates when the sync engine pulls a change.
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -85,6 +80,19 @@ class _AdvisingScreenState extends ConsumerState<AdvisingScreen>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(advisingNotifierProvider, (previous, next) {
+      if (next.error != null && next.error != previous?.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(next.error!),
+            backgroundColor: Colors.redAccent.shade700,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
+    });
+
     final activeSemAsync = ref.watch(activeSemesterProvider);
     final advisingState = ref.watch(advisingNotifierProvider);
     final isFeatureOpenAsync = ref.watch(isAdvisingOpenProvider);

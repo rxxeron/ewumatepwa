@@ -408,32 +408,48 @@ class _AdvisingGenerationOverviewViewState
         }
 
         if (status == 'failed') {
+          final errorMessage = data['error_message']?.toString();
           return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(32.0),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(28.0),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.error_outline,
-                      size: 64, color: Colors.redAccent),
-                  const SizedBox(height: 24),
-                  const Text('No valid combinations found',
+                  const Icon(Icons.error_outline_rounded,
+                      size: 56, color: Colors.redAccent),
+                  const SizedBox(height: 20),
+                  const Text('Schedule Generation Failed',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                           color: Colors.white,
                           fontSize: 18,
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
-                  Text(
-                    'Try removing one or two courses. This usually happens when time slots overlap heavily.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey[400]),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      errorMessage != null && errorMessage.isNotEmpty
+                          ? errorMessage
+                          : 'No valid combinations found. This usually happens when time slots overlap heavily or sections have no seats.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Color(0xFFFCA5A5), fontSize: 13, height: 1.5),
+                    ),
                   ),
-                  const SizedBox(height: 32),
-                  FilledButton(
+                  const SizedBox(height: 28),
+                  FilledButton.icon(
                     onPressed: () =>
                         ref.read(advisingNotifierProvider.notifier).reset(),
-                    style: FilledButton.styleFrom(backgroundColor: Colors.cyan),
-                    child: const Text('Go Back'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.cyan,
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    ),
+                    icon: const Icon(Icons.arrow_back, size: 18),
+                    label: const Text('Adjust Selected Courses'),
                   ),
                 ],
               ),

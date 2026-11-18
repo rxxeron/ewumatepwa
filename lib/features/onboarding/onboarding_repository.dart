@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/utils/course_utils.dart';
-import '../auth/auth_providers.dart';
+import '../../core/data/data_providers.dart';
+import '../../core/data/sync/scope_catalog.dart';
+import '../../core/data/sync/sync_signals.dart';
 
 final onboardingRepositoryProvider = Provider<OnboardingRepository>((ref) {
   return OnboardingRepository(Supabase.instance.client, ref);
@@ -13,6 +15,27 @@ class OnboardingRepository {
   final Ref _ref;
 
   OnboardingRepository(this._client, this._ref);
+
+  /// Onboarding writes go straight to the server (online-only flow). Copy the
+  /// fresh profile row into the local database right away so the launch gate —
+  /// which reads local data — sees the new onboarding status immediately, then
+  /// let the sync engine pull everything the server's triggers changed.
+  Future<void> _refreshLocalProfile() async {
+    final user = _client.auth.currentUser;
+    if (user == null) return;
+    try {
+      final row = await _client.from('profiles').select().eq('id', user.id).maybeSingle();
+      if (row != null) {
+        await _ref.read(appDatabaseProvider).putRow(
+              tbl: 'profiles',
+              rowId: user.id,
+              scope: ScopeCatalog.userScope(user.id),
+              data: row,
+            );
+      }
+    } catch (_) {}
+    SyncSignals.instance.request(force: true, reason: 'onboarding step saved');
+  }
 
   Future<List<Map<String, dynamic>>> fetchDepartments() async {
     // In our live database schema, the programs logic has slightly shifted.
@@ -141,7 +164,7 @@ class OnboardingRepository {
 
     await _client.from('profiles').upsert(payload);
 
-    _ref.invalidate(profileProvider);
+    await _refreshLocalProfile();
   }
 
     Future<void> completeOnboarding() async {
@@ -153,7 +176,7 @@ class OnboardingRepository {
         .update({'onboarding_status': 'completed'})
         .eq('id', user.id);
 
-    _ref.invalidate(profileProvider);
+    await _refreshLocalProfile();
   }
 
   // Stubs for Course History Screen refactor. Implement carefully later.
@@ -249,7 +272,7 @@ class OnboardingRepository {
 
     await _client.from('profiles').upsert(payload);
 
-    _ref.invalidate(profileProvider);
+    await _refreshLocalProfile();
   }
 
   Future<Map<String, dynamic>> fetchUserProfile() async {
@@ -565,6 +588,7 @@ class OnboardingRepository {
 
       // 4. Trigger recalculation
       await recalculateStats(runningSemester);
+      await _refreshLocalProfile();
     } catch (e) {
       debugPrint('[OnboardingRepo] Save History Error: $e');
       rethrow;

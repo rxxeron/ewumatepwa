@@ -22,12 +22,7 @@ class _ResultsScreenState extends ConsumerState<ResultsScreen> {
   @override
   void initState() {
     super.initState();
-    _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (mounted) {
-        ref.invalidate(allSemesterSummariesProvider);
-        ref.invalidate(userProfileProvider);
-      }
-    });
+    // No polling: this screen's data is local and updates when the sync engine pulls a change.
   }
 
   @override

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../data/data_providers.dart';
 import '../../features/auth/auth_providers.dart';
 import '../repositories/progress_repository.dart';
 import '../repositories/dashboard_repository.dart';
@@ -7,6 +8,16 @@ import '../providers/academic_providers.dart';
 import '../../features/semester_progress/semester_summary_providers.dart';
 
 class RefreshUtils {
+  /// Pull-to-refresh: send queued edits and pull server changes now. Local data
+  /// stays on screen meanwhile; screens update through their watch queries.
+  static Future<void> syncNow(WidgetRef ref) async {
+    final coordinator = ref.read(syncCoordinatorProvider);
+    if (coordinator == null) return;
+    try {
+      await coordinator.syncNow().timeout(const Duration(seconds: 20));
+    } catch (_) {}
+  }
+
   static void refreshAcademicData(WidgetRef ref) {
     // 1. Core Profile & Academic State
     ref.invalidate(profileProvider);
