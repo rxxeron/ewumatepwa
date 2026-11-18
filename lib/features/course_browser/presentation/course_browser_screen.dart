@@ -33,13 +33,7 @@ class _CourseBrowserScreenState extends ConsumerState<CourseBrowserScreen> {
   void initState() {
     super.initState();
     _scrollController = ScrollController()..addListener(_onScroll);
-    _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (mounted) {
-        ref.invalidate(userEnrollmentsProvider);
-        ref.invalidate(browserAvailableCoursesProvider);
-        ref.invalidate(paginatedCoursesProvider);
-      }
-    });
+    // No polling: this screen's data is local and updates when the sync engine pulls a change.
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {

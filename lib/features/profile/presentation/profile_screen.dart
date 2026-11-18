@@ -10,10 +10,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/widgets/glass_kit.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/repositories/auth_repository.dart';
+import '../../../core/data/sign_out.dart';
 import '../../../core/repositories/profile_repository.dart';
 import '../../../core/repositories/progress_repository.dart';
-import '../../../core/services/cache_service.dart';
 import '../../../core/models/profile.dart';
 import '../../../core/utils/error_utils.dart';
 import '../../../core/utils/refresh_utils.dart';
@@ -33,14 +32,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (mounted) {
-        final userId = Supabase.instance.client.auth.currentUser?.id;
-        if (userId != null) {
-          ref.invalidate(profileRepositoryProvider);
-        }
-      }
-    });
+    // No polling: this screen's data is local and updates when the sync engine pulls a change.
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -94,9 +86,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
 
     if (confirmed == true && mounted) {
-      await ref.read(cacheServiceProvider).clearAll();
-      await ref.read(authRepositoryProvider).signOut();
-      if (mounted) {
+      if (await signOutSafely(context, ref) && mounted) {
         context.go('/login');
       }
     }

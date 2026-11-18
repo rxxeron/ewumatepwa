@@ -11,8 +11,11 @@ import '../../../../core/repositories/auth_repository.dart';
 import '../../../../core/repositories/progress_repository.dart';
 import '../../../../features/semester_progress/semester_progress_repository.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/providers/supabase_provider.dart';
+import '../../../../core/data/data_providers.dart';
+import '../../../../core/data/repos/local_writer.dart';
+import '../../../../core/data/sync/scope_catalog.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:uuid/uuid.dart';
 import '../providers/course_browser_providers.dart';
 
 class CourseCard extends ConsumerStatefulWidget {
@@ -198,8 +201,26 @@ class _CourseCardState extends ConsumerState<CourseCard> {
     
     final enrollmentsDetailsAsync = ref.watch(userEnrollmentDetailsProvider);
 
-    return enrollmentsDetailsAsync.when(
-      data: (details) {
+    return sectionsAsync.when(
+      loading: () => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      error: (e, _) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text('Error: $e', style: const TextStyle(color: Colors.redAccent)),
+      ),
+      data: (sections) {
+        if (sections.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(20),
+            child: Center(child: Text('No sections available.', style: TextStyle(color: Colors.grey))),
+          );
+        }
+
+        final details = enrollmentsDetailsAsync.value ?? const <Map<String, dynamic>>[];
         // Find if this specific course is enrolled
         final targetEnrolled = details.cast<Map<String, dynamic>?>().firstWhere(
           (e) => e != null && CourseUtils.areEquivalent(e['course_code'], widget.course.code),
@@ -207,108 +228,93 @@ class _CourseCardState extends ConsumerState<CourseCard> {
         );
         final bool enrolledInAny = targetEnrolled != null;
 
-        return sectionsAsync.when(
-          data: (sections) {
-            if (sections.isEmpty) {
-              return const Padding(
-                padding: EdgeInsets.all(20),
-                child: Center(child: Text('No sections available.', style: TextStyle(color: Colors.grey))),
-              );
-            }
+        return Column(
+          children: sections.map((section) {
+            // Logic: Is THIS specific section enrolled?
+            final bool isThisEnrolled = (targetEnrolled != null) && 
+                (targetEnrolled['section_id'] == section.id || 
+                 (targetEnrolled['section'] != null && targetEnrolled['section'].toString() == section.section) ||
+                 (targetEnrolled['section_id'] == null && (section.section == '1' || section.id == sections.first.id)));
 
-            return Column(
-              children: sections.map((section) {
-                // Logic: Is THIS specific section enrolled?
-                final bool isThisEnrolled = (targetEnrolled != null) && 
-                    (targetEnrolled['section_id'] == section.id || 
-                     (targetEnrolled['section'] != null && targetEnrolled['section'].toString() == section.section) ||
-                     (targetEnrolled['section_id'] == null && (section.section == '1' || section.id == sections.first.id)));
+            final String? conflictCourse = (!isThisEnrolled && !enrolledInAny) 
+                ? _getConflictCourse(section, details) 
+                : null;
 
-                final String? conflictCourse = (!isThisEnrolled && !enrolledInAny) 
-                    ? _getConflictCourse(section, details) 
-                    : null;
-
-                return Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          Row(
                             children: [
-                              Row(
-                                children: [
-                                  Text('Section ${section.section}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
-                                  const SizedBox(width: 12),
-                                  _buildCapacityIndicator(section.capacity),
-                                ],
-                              ),
-                              if (conflictCourse != null)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 14),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Conflicts with $conflictCourse',
-                                        style: const TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.w500),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              Text('Section ${section.section}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                              const SizedBox(width: 12),
+                              _buildCapacityIndicator(section.capacity),
                             ],
                           ),
-                          isUpcoming
-                              ? _buildUpcomingActionButton(
-                                  context: context,
-                                  isThisEnrolled: isThisEnrolled,
-                                  hasAnyInThisCourse: enrolledInAny,
-                                  section: section,
-                                  targetSemCode: targetSemCode,
-                                  conflictCourse: conflictCourse,
-                                )
-                              : _buildActionButton(
-                                  isThisEnrolled: isThisEnrolled,
-                                  hasAnyInThisCourse: enrolledInAny,
-                                  enrolledSectionId: targetEnrolled?['section_id'] ?? section.id,
-                                  thisSectionId: section.id,
-                                  thisSectionNumber: section.section,
-                                  academicSemCode: targetSemCode,
-                                ),
+                          if (conflictCourse != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent, size: 14),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Conflicts with $conflictCourse',
+                                    style: const TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.w500),
+                                  ),
+                                ],
+                              ),
+                            ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      ...section.sessions.map((session) {
-                        final bool isLabFallback = CourseUtils.isLab(session.startTime, session.endTime, widget.course.code);
-                        final displayType = session.type.isNotEmpty ? session.type : (isLabFallback ? 'Lab' : 'Theory');
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                              '${session.day} ${session.startTime}-${session.endTime} (${session.faculty}) • $displayType',
-                            style: TextStyle(color: Colors.grey[400], fontSize: 13, height: 1.3),
-                          ),
-                        );
-                      }),
+                      isUpcoming
+                          ? _buildUpcomingActionButton(
+                              context: context,
+                              isThisEnrolled: isThisEnrolled,
+                              hasAnyInThisCourse: enrolledInAny,
+                              section: section,
+                              targetSemCode: targetSemCode,
+                              conflictCourse: conflictCourse,
+                            )
+                          : _buildActionButton(
+                              isThisEnrolled: isThisEnrolled,
+                              hasAnyInThisCourse: enrolledInAny,
+                              enrolledSectionId: targetEnrolled?['section_id'] ?? section.id,
+                              thisSectionId: section.id,
+                              thisSectionNumber: section.section,
+                              academicSemCode: targetSemCode,
+                            ),
                     ],
                   ),
-                );
-              }).toList(),
+                  const SizedBox(height: 8),
+                  ...section.sessions.map((session) {
+                    final bool isLabFallback = CourseUtils.isLab(session.startTime, session.endTime, widget.course.code);
+                    final displayType = session.type.isNotEmpty ? session.type : (isLabFallback ? 'Lab' : 'Theory');
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                          '${session.day} ${session.startTime}-${session.endTime} (${session.faculty}) • $displayType',
+                        style: TextStyle(color: Colors.grey[400], fontSize: 13, height: 1.3),
+                      ),
+                    );
+                  }),
+                ],
+              ),
             );
-          },
-          loading: () => const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(strokeWidth: 2))),
-          error: (e, _) => Padding(padding: const EdgeInsets.all(16), child: Text('Error: $e', style: const TextStyle(color: Colors.redAccent))),
+          }).toList(),
         );
       },
-      loading: () => const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(strokeWidth: 2))),
-      error: (e, _) => const SizedBox(),
     );
   }
 
@@ -716,17 +722,26 @@ class _CourseCardState extends ConsumerState<CourseCard> {
       return;
     }
 
-    final supabase = ref.read(supabaseClientProvider);
+    // Upcoming (next-semester plan) enrollments: plain row writes, local-first and queued.
+    final writer = ref.read(localWriterProvider);
+    if (writer == null) {
+      if (mounted) Navigator.of(dialogContext).pop();
+      return;
+    }
+    Future<void> removeExistingUpcoming() async {
+      final rows = await ref.read(appDatabaseProvider).getRows('enrollments', semester: normSemester(targetSemCode));
+      for (final r in rows) {
+        if (r['user_id'] == user.id &&
+            r['status'] == 'upcoming' &&
+            CourseUtils.areEquivalent('${r['course_code']}', widget.course.code)) {
+          await writer.delete('enrollments', '${r['id']}', label: 'Remove ${widget.course.code} from upcoming');
+        }
+      }
+    }
 
     try {
       if (action == 'drop') {
-        await supabase
-            .from('enrollments')
-            .delete()
-            .eq('user_id', user.id)
-            .eq('semester_code', targetSemCode)
-            .eq('course_code', widget.course.code)
-            .eq('status', 'upcoming');
+        await removeExistingUpcoming();
 
         if (dialogContext.mounted) {
           Navigator.of(dialogContext).pop();
@@ -744,24 +759,17 @@ class _CourseCardState extends ConsumerState<CourseCard> {
           );
         }
       } else {
-        // First delete any existing upcoming enrollment for this course code
-        await supabase
-            .from('enrollments')
-            .delete()
-            .eq('user_id', user.id)
-            .eq('semester_code', targetSemCode)
-            .eq('course_code', widget.course.code)
-            .eq('status', 'upcoming');
-
-        // Insert new upcoming enrollment
-        await supabase.from('enrollments').insert({
+        // Replace any existing upcoming enrollment for this course
+        await removeExistingUpcoming();
+        await writer.upsert('enrollments', {
+          'id': const Uuid().v4(),
           'user_id': user.id,
           'course_code': widget.course.code,
           'semester_code': targetSemCode,
           'section': section.section,
           'section_id': section.id,
           'status': 'upcoming',
-        });
+        }, label: 'Plan ${widget.course.code} section ${section.section}');
 
         if (dialogContext.mounted) {
           Navigator.of(dialogContext).pop();

@@ -10,6 +10,7 @@ import 'package:ewumate/core/repositories/scholarship_repository.dart';
 import 'package:ewumate/core/models/semester_course_marks.dart';
 import 'package:ewumate/core/utils/grade_helper.dart';
 import 'package:ewumate/core/models/grade_scale.dart';
+import 'package:ewumate/core/data/repos/local_writer.dart';
 import 'package:ewumate/core/providers/academic_providers.dart';
 import 'package:ewumate/core/models/models/scholarship_rule_model.dart';
 import 'package:ewumate/core/repositories/course_repository.dart';
@@ -468,60 +469,42 @@ final currentYearEarnedCreditsProvider = FutureProvider<double>((ref) async {
   return years.last.totalCreditsEarned;
 });
 
-/// Fetches the dynamically configured grade point from the database for a specific policy.
-final gradePointMapProvider =
-    FutureProvider.family<Map<String, double>, String>((ref, policy) async {
-      final supabase = Supabase.instance.client;
-      final res = await supabase
-          .from('grade_scale')
-          .select('grade, point')
-          .eq('policy', policy);
-
-      Map<String, double> points = {};
-      for (var row in res) {
-        if (row['point'] != null) {
-          points[row['grade']] = (row['point'] as num).toDouble();
-        }
-      }
-      return points;
-    });
-
-/// Fetches the dynamically configured grade scale from the database for a specific policy.
-final gradeScaleMapProvider =
-    FutureProvider.family<Map<String, double>, String>((ref, policy) async {
-      final supabase = Supabase.instance.client;
-      final res = await supabase
-          .from('grade_scale')
-          .select('grade, min_score')
-          .eq('policy', policy);
-
-      Map<String, double> scale = {};
-      for (var row in res) {
-        if (row['min_score'] != null) {
-          scale[row['grade']] = (row['min_score'] as num).toDouble();
-        }
-      }
-      return scale;
-    });
-
-/// Fetches the list of valid grades for a policy, sorted by grade point descending.
-final policyGradesProvider = FutureProvider.family<List<String>, String>((
-  ref,
-  policy,
-) async {
-  final supabase = Supabase.instance.client;
-  final res = await supabase
-      .from('grade_scale')
-      .select('grade, point')
-      .eq('policy', policy)
-      .order('point', ascending: false);
-
-  return (res as List).map((row) => row['grade'] as String).toList();
+/// All grade_scale rows, from the local database (scope `reference`); network
+/// only before the first sync.
+final _gradeScaleRowsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final local = await ref.watch(localRowsProvider(('grade_scale', null)).future);
+  if (local.isNotEmpty) return local;
+  final res = await Supabase.instance.client.from('grade_scale').select('*');
+  return (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
 });
 
-/// Fetches the full list of grade scale entries.
+Future<List<Map<String, dynamic>>> _policyRows(Ref ref, String policy) async =>
+    (await ref.watch(_gradeScaleRowsProvider.future)).where((r) => r['policy'] == policy).toList();
+
+/// Grade -> point for a policy.
+final gradePointMapProvider = FutureProvider.family<Map<String, double>, String>((ref, policy) async {
+  return {
+    for (final row in await _policyRows(ref, policy))
+      if (row['point'] != null) '${row['grade']}': (row['point'] as num).toDouble(),
+  };
+});
+
+/// Grade -> minimum score for a policy.
+final gradeScaleMapProvider = FutureProvider.family<Map<String, double>, String>((ref, policy) async {
+  return {
+    for (final row in await _policyRows(ref, policy))
+      if (row['min_score'] != null) '${row['grade']}': (row['min_score'] as num).toDouble(),
+  };
+});
+
+/// Valid grades for a policy, highest grade point first.
+final policyGradesProvider = FutureProvider.family<List<String>, String>((ref, policy) async {
+  final rows = await _policyRows(ref, policy)
+    ..sort((a, b) => ((b['point'] as num?) ?? 0).compareTo((a['point'] as num?) ?? 0));
+  return rows.map((row) => '${row['grade']}').toList();
+});
+
+/// The full list of grade scale entries.
 final gradeScaleListProvider = FutureProvider<List<GradeScale>>((ref) async {
-  final supabase = Supabase.instance.client;
-  final res = await supabase.from('grade_scale').select('*');
-  return (res as List).map((row) => GradeScale.fromJson(row)).toList();
+  return (await ref.watch(_gradeScaleRowsProvider.future)).map(GradeScale.fromJson).toList();
 });

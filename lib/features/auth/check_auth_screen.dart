@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../core/data/data_providers.dart';
+import '../../core/data/sync/sync_engine.dart';
+import '../../core/models/profile.dart';
 import '../../core/widgets/sky_animation.dart';
 import '../../core/widgets/animated_startup_cover.dart';
 import '../../core/services/tutorial_service.dart';
@@ -10,6 +12,8 @@ import 'auth_providers.dart';
 import '../../core/repositories/auth_repository.dart' hide authStateProvider;
 import '../../core/services/cache_service.dart';
 
+/// Launch gate. Routes from LOCAL data on the first frame when it exists; only a
+/// brand-new device (or the first sign-in) waits for the first download.
 class CheckAuthScreen extends ConsumerStatefulWidget {
   const CheckAuthScreen({super.key});
 
@@ -18,132 +22,85 @@ class CheckAuthScreen extends ConsumerStatefulWidget {
 }
 
 class _CheckAuthScreenState extends ConsumerState<CheckAuthScreen> {
-  Timer? _stallTimer;
-  final DateTime _initTime = DateTime.now();
+  bool _navigated = false;
+  bool _offline = false;
+  StreamSubscription<SyncReport>? _reports;
 
-  @override
-  void initState() {
-    super.initState();
-    _startStallTimer();
-  }
-
-  void _navigateWithDelay(String route) {
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final elapsed = DateTime.now().difference(_initTime);
-      const minDuration = Duration(milliseconds: 3500);
-      if (elapsed < minDuration) {
-        await Future.delayed(minDuration - elapsed);
-      }
-      if (mounted) {
-        context.go(route);
-      }
+  void _go(String route) {
+    if (_navigated) return;
+    _navigated = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.go(route);
     });
   }
 
-  void _startStallTimer() {
-    _stallTimer?.cancel();
-    _stallTimer = Timer(const Duration(seconds: 45), () {
-      if (mounted) {
-        debugPrint("[CheckAuth] STALL DETECTED: Screen stuck for 45s. Showing retry option.");
-        setState(() {});
-      }
+  /// First download for this user on this device: watch the sync result so an
+  /// offline first launch shows a retry instead of spinning forever.
+  void _watchFirstSync(SyncEngine engine) {
+    _reports ??= engine.reports.listen((r) {
+      if (mounted) setState(() => _offline = r.offline || r.errors.isNotEmpty);
     });
   }
 
   @override
   void dispose() {
-    _stallTimer?.cancel();
+    _reports?.cancel();
     super.dispose();
+  }
+
+  String _routeFor(Profile p) {
+    if (p.onboardingStatus == 'pending' || p.onboardingStatus == 'registered' || p.programCode == null) {
+      return '/onboarding/profile-setup';
+    }
+    if (p.onboardingStatus == 'course_history') return '/onboarding/course-history';
+    return ''; // complete -> grade blocker / dashboard
   }
 
   @override
   Widget build(BuildContext context) {
-    final profileAsync = ref.watch(profileProvider);
-    final user = ref.watch(currentUserProvider); // Reactive user source
+    final uid = ref.watch(currentUserIdProvider);
+    ref.watch(syncCoordinatorProvider); // starts syncing as soon as a user is known
+
+    Widget body;
+    if (uid == null) {
+      _go('/login');
+      body = const CircularProgressBinding(text: 'Redirecting to login...');
+    } else {
+      final profile = ref.watch(profileProvider).value;
+      final ready = ref.watch(userDataReadyProvider).value ?? false;
+
+      if (profile != null) {
+        final route = _routeFor(profile);
+        if (route.isNotEmpty) {
+          _go(route);
+          body = const CircularProgressBinding(text: 'Restoring session...');
+        } else {
+          body = _GradeBlockerWrapper(onNavigate: _go);
+        }
+      } else if (ready) {
+        // Downloaded, and the server has no profile for this account: new user.
+        _go('/onboarding/program');
+        body = const CircularProgressBinding(text: 'Setting up your profile...');
+      } else {
+        final engine = ref.watch(syncEngineProvider);
+        if (engine != null) _watchFirstSync(engine);
+        body = _offline
+            ? _ErrorView(
+                message: 'Connect to the internet once to download your data.\nAfter that the app works offline.',
+                onRetry: () {
+                  setState(() => _offline = false);
+                  ref.read(syncCoordinatorProvider)?.schedule(force: true, delay: Duration.zero);
+                },
+              )
+            : const CircularProgressBinding(text: 'Downloading your data...');
+      }
+    }
 
     return Scaffold(
       body: Stack(
         children: [
           const Positioned.fill(child: SkyAnimationWidget()),
-          Center(
-            child: profileAsync.when(
-              data: (profile) {
-                _stallTimer?.cancel();
-
-                // 0. Primary Auth Check: If the Supabase session is null, they are signed out
-                final hasSession = Supabase.instance.client.auth.currentSession != null;
-                if (user == null && !hasSession) {
-                  debugPrint("[CheckAuth] User is signed out. Redirecting to Login.");
-                  _navigateWithDelay('/login');
-                  return const CircularProgressBinding(text: 'Redirecting to login...');
-                }
-
-                // 1. If we have NO profile data
-                if (profile == null) {
-                  debugPrint("[CheckAuth] Profile is NULL. User is: ${user?.id}");
-                  
-                  if (user != null) {
-                    // SAFETY: Wait for the profile provider to finish its first fetch after login.
-                    // If it's still null after being authenticated, then we can assume it's a new user.
-                    if (profileAsync.isLoading || profileAsync.isRefreshing) {
-                       return const CircularProgressBinding(text: 'Loading identity...');
-                    }
-                    
-                    // Logged in but no record in DB yet
-                    debugPrint("[CheckAuth] Redirecting to Onboarding (No Profile Record)");
-                    _navigateWithDelay('/onboarding/program');
-                    return const CircularProgressBinding(text: 'Setting up your profile...');
-                  }
-
-                  // Not logged in -> Login
-                  // Truly no identity found? Wait briefly for Supabase to be 100% sure.
-                  // We also check if we have a cached identity - if so, we shouldn't kick them out yet.
-                  Future.delayed(const Duration(seconds: 10), () {
-                    final hasLastUser = ref.read(cacheServiceProvider).getLastUserId() != null;
-                    if (mounted && user == null && Supabase.instance.client.auth.currentUser == null && !hasLastUser) {
-                      debugPrint("[CheckAuth] No current user and no cached identity. Redirecting to login.");
-                      if (context.mounted) {
-                        context.go('/login');
-                      }
-                    }
-                  });
-                  return const CircularProgressBinding(text: 'Searching for you...');
-                }
-
-                // 2. We HAVE profile data
-                debugPrint("[CheckAuth] Profile Found: ${profile.id}, Status: ${profile.onboardingStatus}, Program: ${profile.programCode}");
-
-                if (profile.onboardingStatus == 'pending' ||
-                    profile.onboardingStatus == 'registered' ||
-                    profile.programCode == null) {
-                  debugPrint("[CheckAuth] Redirecting to Profile Setup Flow (Incomplete Profile)");
-                  _navigateWithDelay('/onboarding/profile-setup');
-                } else if (profile.onboardingStatus == 'course_history') {
-                  debugPrint("[CheckAuth] Redirecting to Course History (Partial Completion)");
-                  _navigateWithDelay('/onboarding/course-history');
-                } else {
-                  debugPrint("[CheckAuth] Onboarding Complete. Checking Grade Blocker.");
-                  return _GradeBlockerWrapper(onNavigate: _navigateWithDelay);
-                }
-                return const CircularProgressBinding(text: 'Restoring session...');
-              },
-              error: (err, stack) {
-                debugPrint("[CheckAuth] ERROR: $err\n$stack");
-                _stallTimer?.cancel();
-                return _ErrorView(
-                  message: 'Connection issue: $err',
-                  onRetry: () {
-                    _startStallTimer();
-                    ref.invalidate(profileProvider);
-                  },
-                );
-              },
-              loading: () {
-                debugPrint("[CheckAuth] Loading state...");
-                return const CircularProgressBinding(text: 'Securing universe...');
-              },
-            ),
-          ),
+          Center(child: body),
         ],
       ),
     );
@@ -241,6 +198,7 @@ class _ErrorView extends ConsumerWidget {
               );
               if (confirmed == true) {
                 await ref.read(cacheServiceProvider).clearAll();
+                await ref.read(appDatabaseProvider).clearUserData();
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Cache cleared. Restarting...')),

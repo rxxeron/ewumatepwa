@@ -48,7 +48,7 @@ final class TaskRepositoryProvider
   }
 }
 
-String _$taskRepositoryHash() => r'ad18cbe98edcc69337a096cea459a1d015087c8f';
+String _$taskRepositoryHash() => r'e049b86d616e43c22c92039019b3c3e97ea807ab';
 
 @ProviderFor(activeTasksConfig)
 final activeTasksConfigProvider = ActiveTasksConfigProvider._();
@@ -81,7 +81,7 @@ final class ActiveTasksConfigProvider extends $FunctionalProvider<
   }
 }
 
-String _$activeTasksConfigHash() => r'd01486e6e05a38c38757d7405f8e4df4cb5352f6';
+String _$activeTasksConfigHash() => r'e5f0817e06cc56e22adc8f91c95858389a5fe22e';
 
 @ProviderFor(allTasksStream)
 final allTasksStreamProvider = AllTasksStreamProvider._();
@@ -114,7 +114,7 @@ final class AllTasksStreamProvider extends $FunctionalProvider<
   }
 }
 
-String _$allTasksStreamHash() => r'62390525e22529e38c70bb08c6664e14cf7b3163';
+String _$allTasksStreamHash() => r'e6fa62f23a39862e103a93c445b5029fd72f087f';
 
 @ProviderFor(userNotifications)
 final userNotificationsProvider = UserNotificationsProvider._();

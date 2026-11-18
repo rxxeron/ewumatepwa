@@ -15,6 +15,7 @@ import '../router/app_router.dart';
 import '../widgets/glass_kit.dart';
 import '../repositories/notification_repository.dart';
 import '../models/notification.dart' as model;
+import '../data/sync/sync_signals.dart';
 
 class PendingNotificationAction {
   final String title;
@@ -168,6 +169,9 @@ class FCMService {
 
     // Foreground listener
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      // Any push (silent sync notice or a visible notification) means server data changed: pull it.
+      SyncSignals.instance.request(reason: 'fcm');
+      if (message.data['type'] == 'sync' && message.notification == null) return;
       final notifTitle = message.notification?.title ?? 
                          (message.data['title'] as String?) ?? 
                          'New Notification';

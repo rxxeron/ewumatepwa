@@ -49,7 +49,7 @@ final class CourseRepositoryProvider extends $FunctionalProvider<
   }
 }
 
-String _$courseRepositoryHash() => r'653bb98093683beb3fec7fb2bde4475d7561a32e';
+String _$courseRepositoryHash() => r'21c28d0cd6063ad048c71b0ab388c3b4c9fcc784';
 
 @ProviderFor(allCourses)
 final allCoursesProvider = AllCoursesProvider._();

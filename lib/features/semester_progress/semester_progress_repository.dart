@@ -1,217 +1,52 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../core/services/cache_service.dart';
+import '../../core/data/data_providers.dart';
+import '../../core/data/db/app_database.dart';
+import '../../core/data/repos/local_queries.dart';
+import '../../core/data/repos/marks_local.dart';
+import '../../core/data/sync/outbox.dart';
 import '../../core/repositories/auth_repository.dart';
 import '../../core/utils/course_utils.dart';
 
 final semesterProgressRepositoryProvider = Provider((ref) => SemesterProgressRepository(
-  Supabase.instance.client,
-  ref.watch(cacheServiceProvider)
-));
+      ref.watch(appDatabaseProvider),
+      ref.watch(outboxProvider),
+    ));
 
+/// Marks/attendance per course, from the local database. Saves are applied
+/// locally at once and synced by the outbox (offline-safe).
 class SemesterProgressRepository {
-  final SupabaseClient _supabase;
-  final CacheService _cache;
-  SemesterProgressRepository(this._supabase, this._cache);
+  final AppDatabase _db;
+  final MarksLocal _marks;
+  SemesterProgressRepository(this._db, Outbox outbox) : _marks = MarksLocal(_db, outbox);
 
-  static String? _cachedActiveSemCode;
-  static DateTime? _cachedActiveSemCodeTime;
-
+  /// Current semester of the signed-in user's track (local active_semester).
   Future<String> getActiveSemesterCode() async {
-    if (_cachedActiveSemCode != null &&
-        _cachedActiveSemCodeTime != null &&
-        DateTime.now().difference(_cachedActiveSemCodeTime!).inHours < 12) {
-      return _cachedActiveSemCode!;
-    }
-
-    final local = _cache.getMapData('semester_progress_box', 'active_semester_code');
-    if (local != null && local['code'] != null) {
-      _cachedActiveSemCode = local['code'] as String;
-      _cachedActiveSemCodeTime = DateTime.now();
-      return _cachedActiveSemCode!;
-    }
-
-    try {
-      final config = await _supabase
-          .from('active_semester')
-          .select('current_semester_code')
-          .limit(1)
-          .maybeSingle();
-      final code = config?['current_semester_code'] as String? ?? 'Spring2026';
-      _cachedActiveSemCode = code;
-      _cachedActiveSemCodeTime = DateTime.now();
-      _cache.setMapData('semester_progress_box', 'active_semester_code', {'code': code});
-      return code;
-    } catch (e) {
-      return local?['code'] ?? 'Spring2026';
-    }
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    final profile = uid == null ? null : await _db.getRow('profiles', uid);
+    final track = CourseUtils.normalizeTrack('${profile?['track'] ?? profile?['semester_type'] ?? ''}');
+    final row = await LocalQueries(_db).activeSemester(track) ??
+        (await _db.getRows('active_semester')).firstOrNull;
+    return '${row?['current_semester_code'] ?? ''}';
   }
 
-  Future<List<Map<String, dynamic>>> getSemesterProgressData(String userId, String semesterCode) async {
-    final cleanSem = CourseUtils.cleanSemester(semesterCode);
-    final cacheKey = 'marks_${userId}_$cleanSem';
-    
-    // 1. Try cache first
-    final cached = _cache.getMapData('semester_progress_box', cacheKey);
-    if (cached != null && cached['data'] != null) {
-      // Trigger background sync safely
-      _fetchProgressAndCache(userId, cleanSem, cacheKey).catchError((_) => <Map<String, dynamic>>[]);
-      return List<Map<String, dynamic>>.from(cached['data']);
-    }
+  Future<List<Map<String, dynamic>>> getSemesterProgressData(String userId, String semesterCode) =>
+      _marks.semesterRows(userId, semesterCode);
 
-    return await _fetchProgressAndCache(userId, cleanSem, cacheKey);
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchProgressAndCache(String userId, String semesterCode, String cacheKey) async {
-    try {
-      final safeSem = CourseUtils.cleanSemester(semesterCode);
-      final spaceSem = semesterCode.replaceAllMapped(RegExp(r'([a-zA-Z]+)(\d+)'), (m) => '${m[1]} ${m[2]}');
-      
-      if (kDebugMode) {
-        print('[SemesterProgress] Fetching for $userId, Sem: $semesterCode, Safe: $safeSem');
-      }
-
-      final enrollments = await _supabase
-          .from('enrollments')
-          .select('course_code')
-          .eq('user_id', userId)
-          .inFilter('semester_code', [semesterCode, safeSem, spaceSem, semesterCode.toLowerCase(), semesterCode.replaceAll(' ', '')]);
-
-      final enrolledCourseCodes = (enrollments as List).map((e) => e['course_code'] as String).toList();
-      
-      if (kDebugMode) {
-        print('[SemesterProgress] Found ${enrolledCourseCodes.length} enrollments: $enrolledCourseCodes');
-      }
-
-      final marksRes = await _supabase
-          .from('semester_course_marks')
-          .select('*')
-          .eq('user_id', userId)
-          .inFilter('semester_code', [
-            semesterCode, 
-            CourseUtils.cleanSemester(semesterCode), 
-            semesterCode.toLowerCase(),
-            semesterCode.replaceAll(' ', ''),
-            spaceSem
-          ]);
-      
-      final marksData = List<Map<String, dynamic>>.from(marksRes);
-
-      // 3. Merge pending mutations from sync queue to prevent race conditions
-      final queue = _cache.getSyncQueue(userId);
-      final pendingMarks = queue
-          .where((item) => item['action'] == 'save_course_marks' && CourseUtils.cleanSemester(item['semesterCode']?.toString() ?? '') == safeSem)
-          .map((item) => Map<String, dynamic>.from(item['data']))
-          .toList();
-
-      for (var pending in pendingMarks) {
-        final code = (pending['course_code'] as String).toUpperCase().replaceAll(' ', '');
-        final index = marksData.indexWhere((m) => (m['course_code'] as String).toUpperCase().replaceAll(' ', '') == code);
-        if (index != -1) {
-          marksData[index] = {...marksData[index], ...pending};
-        } else {
-          marksData.add(pending);
-        }
-      }
-
-      // 4. Build final list, prioritizing enrollments but including any existing marks
-      List<Map<String, dynamic>> progressData = [];
-      
-      // First, add all enrolled courses
-      for (var code in enrolledCourseCodes) {
-        final normalizedCode = code.toUpperCase().replaceAll(' ', '');
-        final existingMark = marksData.firstWhere(
-          (m) => (m['course_code'] as String).toUpperCase().replaceAll(' ', '') == normalizedCode, 
-          orElse: () => <String, dynamic>{
-            'id': 'new_$normalizedCode', 
-            'user_id': userId,
-            'semester_code': safeSem,
-            'course_code': code,
-            'is_new': true,
-          }
-        );
-        progressData.add(existingMark);
-      }
-
-      // Second, add any extra marks that aren't in enrollments (to prevent "disappearing" data)
-      for (var mark in marksData) {
-        final normalizedCode = (mark['course_code'] as String).toUpperCase().replaceAll(' ', '');
-        if (!progressData.any((p) => (p['course_code'] as String).toUpperCase().replaceAll(' ', '') == normalizedCode)) {
-          progressData.add(mark);
-        }
-      }
-      
-      // Update Cache
-      _cache.setMapData('semester_progress_box', cacheKey, {'data': progressData});
-      
-      return progressData;
-    } catch (e) {
-      if (kDebugMode) debugPrint('[SemesterProgress] Network fetch failed: $e');
-      return [];
-    }
-  }
+  Stream<List<Map<String, dynamic>>> watchSemesterProgressData(String userId, String semesterCode) =>
+      _marks.watchSemesterRows(userId, semesterCode);
 
   Future<void> saveCourseMarks(String userId, String semesterCode, Map<String, dynamic> data) async {
-    final safeSem = CourseUtils.cleanSemester(semesterCode);
-    try {
-      // Use UPSERT for robustness (handles both insert and update automatically)
-      // We must remove the temporary 'new_' ID if it exists
-      if (data['id'] != null && data['id'].toString().startsWith('new_')) {
-        data.remove('id');
-      }
-
-      // Normalize course code
-      if (data['course_code'] != null) {
-        data['course_code'] = (data['course_code'] as String).toUpperCase().replaceAll(' ', '');
-      }
-
-      // Remove UI-only flags before saving to DB
-      data.remove('is_new');
-
-      final res = await _supabase.from('semester_course_marks')
-          .upsert(
-            {...data, 'semester_code': safeSem}, 
-            onConflict: 'user_id,semester_code,course_code'
-          )
-          .select()
-          .single();
-      
-      _updateProgressCache(userId, safeSem, res);
-    } catch (e) {
-      if (kDebugMode) debugPrint('[SemesterProgress] Offline write queued: $e');
-      _updateProgressCache(userId, safeSem, data);
-      
-      await _cache.enqueueMutation(userId, {
-        'action': 'save_course_marks',
-        'semesterCode': safeSem,
-        'data': data,
-      });
-    }
-  }
-  
-  void _updateProgressCache(String userId, String semesterCode, Map<String, dynamic> data) {
-    final cleanSem = CourseUtils.cleanSemester(semesterCode);
-    final cacheKey = 'marks_${userId}_$cleanSem';
-    final cached = _cache.getMapData('semester_progress_box', cacheKey) ?? {'data': []};
-    final list = List<Map<String, dynamic>>.from(cached['data'] ?? []);
-    
-    final normalizedCode = (data['course_code'] as String).toUpperCase().replaceAll(' ', '');
-    final index = list.indexWhere((m) => (m['course_code'] as String).toUpperCase().replaceAll(' ', '') == normalizedCode);
-    if (index != -1) {
-      list[index] = {...list[index], ...data};
-    } else {
-      // Only add if it's not already there (prevent duplicates)
-      list.add(data);
-    }
-    _cache.setMapData('semester_progress_box', cacheKey, {'data': list});
+    await _marks.save(userId, semesterCode, data,
+        normalizeCode: (c) => c.toUpperCase().replaceAll(' ', ''));
   }
 }
 
-final semesterProgressDataProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, semesterCode) async {
+/// Re-emits whenever the semester's marks or enrollments change locally (edits, sync).
+final semesterProgressDataProvider =
+    StreamProvider.family<List<Map<String, dynamic>>, String>((ref, semesterCode) {
   final user = ref.watch(currentUserProvider);
-  if (user == null) return [];
-  
-  return ref.watch(semesterProgressRepositoryProvider).getSemesterProgressData(user.id, semesterCode);
+  if (user == null) return Stream.value(const []);
+  return ref.watch(semesterProgressRepositoryProvider).watchSemesterProgressData(user.id, semesterCode);
 });

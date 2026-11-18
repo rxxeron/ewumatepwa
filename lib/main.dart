@@ -14,6 +14,11 @@ import 'core/config/url_strategy_config.dart'
     if (dart.library.html) 'core/config/url_strategy_config_web.dart';
 import 'core/theme/app_theme.dart';
 import 'core/repositories/auth_repository.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/data/data_providers.dart';
+import 'core/data/db/app_database.dart';
+import 'core/data/hive_import.dart';
 
 Future<void> _bootloader(CacheService cache) async {
   // 1. Cache Layer
@@ -78,14 +83,26 @@ void main() async {
     );
   };
 
+  // Sora is bundled (assets/fonts): no runtime font downloads.
+  GoogleFonts.config.allowRuntimeFetching = false;
+
   final cacheService = CacheService();
+  final db = AppDatabase();
+  AppDatabase.main = db;
   await _bootloader(cacheService);
+
+  String? userId;
+  try {
+    userId = Supabase.instance.client.auth.currentUser?.id;
+  } catch (_) {}
+  await importLegacyHiveCache(db, userId: userId ?? cacheService.getLastUserId());
 
   runApp(
     ProviderScope(
       // Provide the initialized cache service instance synchronously to the remaining app
       overrides: [
         cacheServiceProvider.overrideWithValue(cacheService),
+        appDatabaseProvider.overrideWithValue(db),
       ],
       child: const MyApp(),
     ),
@@ -99,6 +116,8 @@ class MyApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Initialize Session Guardian
     ref.read(sessionGuardianProvider);
+    // Offline-first sync (local database <- server changes); rebuilt on sign-in/out.
+    ref.watch(syncCoordinatorProvider);
 
     // Initialize PWA / Service Worker update listener
     if (kIsWeb) {

@@ -25,7 +25,7 @@ jobs:
       - name: Setup Flutter
         uses: flutter-actions/setup-flutter@v3
         with:
-          flutter-version: '3.27.0'
+          flutter-version: '3.47.9'
           channel: 'stable'
 
       - name: Create .env file from secret

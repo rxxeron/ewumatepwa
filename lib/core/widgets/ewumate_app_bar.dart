@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../providers/scaffold_provider.dart';
 import '../theme/ewu_theme_extension.dart';
+import 'sync_status_chip.dart';
 
 class EWUmateAppBar extends ConsumerWidget implements PreferredSizeWidget {
   final String title;
@@ -68,7 +69,11 @@ class EWUmateAppBar extends ConsumerWidget implements PreferredSizeWidget {
           fontSize: 20,
         ),
       ),
-      actions: actions,
+      actions: [
+        // Honest freshness: invisible when synced; "Offline · synced 3 h ago" etc. otherwise.
+        const Center(child: Padding(padding: EdgeInsets.only(right: 8), child: SyncStatusChip())),
+        ...?actions,
+      ],
       bottom: bottom,
       centerTitle: false,
     );

@@ -1,14 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:flutter/foundation.dart';
+import '../../../../core/data/repos/local_writer.dart';
+import '../../../../core/data/sync/scope_catalog.dart';
 import '../../../../core/repositories/course_repository.dart';
 import '../../../../core/repositories/profile_repository.dart';
 import '../../../../core/repositories/auth_repository.dart';
-import '../../../../core/providers/supabase_provider.dart';
 import '../../../../core/providers/academic_providers.dart';
-import '../../../../core/services/cache_service.dart';
 import '../../../../core/models/course_metadata.dart';
-import '../../../../core/utils/course_utils.dart';
 
 final courseSearchQueryProvider = StateProvider<String>((ref) => '');
 
@@ -122,112 +120,28 @@ final selectedBrowserSemesterCodeProvider = FutureProvider<String>((ref) async {
   return state?.currentSemesterCode ?? '';
 });
 
+/// Course codes the user has in the selected semester (enrollments + manual marks
+/// entries), from local data — instant and offline.
 final userEnrollmentsProvider = FutureProvider<List<String>>((ref) async {
   final user = ref.watch(currentUserProvider);
   if (user == null) return [];
-  
+
   final targetSem = await ref.watch(selectedBrowserSemesterCodeProvider.future);
   if (targetSem.isEmpty) return [];
-
   final scope = ref.watch(selectedSemesterScopeProvider);
-  final supabase = ref.watch(supabaseClientProvider);
-  final cache = ref.watch(cacheServiceProvider);
-  final safeSem = CourseUtils.cleanSemester(targetSem);
-  final spaceSem = targetSem.replaceAllMapped(RegExp(r'([a-zA-Z]+)(\d+)'), (m) => '${m[1]} ${m[2]}');
-  
-  if (scope == SemesterScope.upcoming) {
-    try {
-      final enrollData = await supabase
-          .from('enrollments')
-          .select('course_code')
-          .eq('user_id', user.id)
-          .eq('status', 'upcoming')
-          .inFilter('semester_code', [targetSem, safeSem, spaceSem, targetSem.toLowerCase(), targetSem.replaceAll(' ', '')]);
-      final enrolled = (enrollData as List).map((e) => e['course_code'] as String).toList();
-      cache.setMapData('dashboard_box', 'upcoming_enrollment_codes_${user.id}_$targetSem', {'codes': enrolled});
-      return enrolled;
-    } catch (e) {
-      if (kDebugMode) debugPrint('[CourseBrowser] Upcoming enrollment fetch failed: $e');
-      final cached = cache.getMapData('dashboard_box', 'upcoming_enrollment_codes_${user.id}_$targetSem');
-      if (cached != null && cached['codes'] != null) {
-        return List<String>.from(cached['codes']);
-      }
-      return [];
-    }
+  final sem = normSemester(targetSem);
+
+  final enrollments = (await ref.watch(localRowsProvider(('enrollments', sem)).future))
+      .where((e) => e['user_id'] == user.id)
+      .where((e) => scope != SemesterScope.upcoming || e['status'] == 'upcoming');
+  final codes = {for (final e in enrollments) '${e['course_code']}'};
+
+  if (scope != SemesterScope.upcoming) {
+    final marks = await ref.watch(localRowsProvider(('semester_course_marks', sem)).future);
+    codes.addAll(marks.where((m) => m['user_id'] == user.id).map((m) => '${m['course_code']}'));
   }
-  
-  try {
-    // 1. Fetch from Enrollments
-    final enrollData = await supabase
-        .from('enrollments')
-        .select('course_code')
-        .eq('user_id', user.id)
-        .inFilter('semester_code', [targetSem, safeSem, spaceSem, targetSem.toLowerCase(), targetSem.replaceAll(' ', '')]);
-        
-    final enrolled = (enrollData as List).map((e) => e['course_code'] as String).toList();
-
-    // 2. Fetch from Marks (to include manual entries)
-    final marksData = await supabase
-        .from('semester_course_marks')
-        .select('course_code')
-        .eq('user_id', user.id)
-        .inFilter('semester_code', [targetSem, safeSem, spaceSem, targetSem.toLowerCase(), targetSem.replaceAll(' ', '')]);
-    
-    final marked = (marksData as List).map((e) => e['course_code'] as String).toList();
-
-    // Merge and deduplicate
-    final res = {...enrolled, ...marked}.toList();
-    
-    // Cache it
-    cache.setMapData('dashboard_box', 'enrollment_codes_${user.id}_$targetSem', {'codes': res});
-    return res;
-  } catch (e) {
-    if (kDebugMode) debugPrint('[CourseBrowser] Enrollment fetch failed, using cache: $e');
-    final cached = cache.getMapData('dashboard_box', 'enrollment_codes_${user.id}_$targetSem');
-    if (cached != null && cached['codes'] != null) {
-      final List<String> codes = List<String>.from(cached['codes']);
-      if (codes.isNotEmpty) return codes;
-    }
-
-    try {
-      final sched = cache.getCachedDashboardSchedule(user.id, safeSem) 
-          ?? cache.getCachedDashboardSchedule(user.id, targetSem)
-          ?? cache.getCachedDashboardSchedule(user.id, targetSem.toLowerCase())
-          ?? cache.getCachedDashboardSchedule(user.id, targetSem.replaceAll(' ', ''));
-      if (sched != null) {
-        final List<dynamic> template = sched['template'] as List? ?? [];
-        final List<dynamic> exceptions = sched['exceptions'] as List? ?? [];
-        
-        final Set<String> codes = {};
-        for (var cls in template) {
-          if (cls is Map) {
-            final String? code = (cls['courseCode'] ?? cls['course_code'])?.toString();
-            if (code != null && code.trim().isNotEmpty) {
-              codes.add(code.trim().toUpperCase());
-            }
-          }
-        }
-        for (var ex in exceptions) {
-          if (ex is Map) {
-            final String? code = (ex['course_code'] ?? ex['courseCode'])?.toString();
-            if (code != null && code.trim().isNotEmpty) {
-              codes.add(code.trim().toUpperCase());
-            }
-          }
-        }
-        if (codes.isNotEmpty) {
-          final List<String> uniqueCodes = codes.toList()..sort();
-          if (kDebugMode) debugPrint('[CourseBrowser] Offline Fallback: Extracted course codes from cached schedule: $uniqueCodes');
-          return uniqueCodes;
-        }
-      }
-    } catch (innerEx) {
-      if (kDebugMode) debugPrint('[CourseBrowser] Secondary fallback extraction error: $innerEx');
-    }
-    return [];
-  }
+  return codes.where((c) => c.isNotEmpty && c != 'null').toList();
 });
-
 final browserAvailableCoursesProvider = FutureProvider<List<CourseMetadata>>((ref) async {
   final targetSem = await ref.watch(selectedBrowserSemesterCodeProvider.future);
   if (targetSem.isEmpty) return [];
@@ -257,28 +171,8 @@ final browserAvailableCoursesProvider = FutureProvider<List<CourseMetadata>>((re
   }));
   final completedCourseCodes = completedCourseCodesStr.split(',').where((e) => e.isNotEmpty).toSet();
 
-  final cache = ref.watch(cacheServiceProvider);
-  
-  try {
-    final allCourses = await ref.watch(semesterCoursesProvider(targetSem).future);
-    
-    // Filter out successfully completed courses
-    final res = allCourses.where((course) {
-      return !completedCourseCodes.contains(course.code.toUpperCase());
-    }).toList();
-
-    // Cache it
-    cache.setMapData('dashboard_box', 'available_courses_$targetSem', 
-      {'data': res.map((e) => e.toJson()).toList()});
-    return res;
-  } catch (e) {
-    if (kDebugMode) debugPrint('[CourseBrowser] Available courses fallback: $e');
-    final cached = cache.getMapData('dashboard_box', 'available_courses_$targetSem');
-    if (cached != null && cached['data'] != null) {
-      return (cached['data'] as List).map((e) => CourseMetadata.fromJson(e)).toList();
-    }
-    return [];
-  }
+  final allCourses = await ref.watch(semesterCoursesProvider(targetSem).future);
+  return allCourses.where((course) => !completedCourseCodes.contains(course.code.toUpperCase())).toList();
 });
 
 final filteredAvailableCoursesProvider = Provider<AsyncValue<List<CourseMetadata>>>((ref) {
@@ -307,26 +201,37 @@ final filteredAvailableCoursesProvider = Provider<AsyncValue<List<CourseMetadata
   });
 });
 
+/// The user's enrollments in the selected semester with section time/room/faculty,
+/// from local data. Rows with `_pending: true` are queued offline and not yet confirmed.
 final userEnrollmentDetailsProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
   final user = ref.watch(currentUserProvider);
   if (user == null) return [];
-  
+
   final targetSem = await ref.watch(selectedBrowserSemesterCodeProvider.future);
   if (targetSem.isEmpty) return [];
-
   final scope = ref.watch(selectedSemesterScopeProvider);
-  final supabase = ref.watch(supabaseClientProvider);
-  
-  var query = supabase
-      .from('enrollments')
-      .select('id, user_id, semester_code, course_code, section, section_id, time, room, status, faculty_initial')
-      .eq('user_id', user.id)
-      .eq('semester_code', targetSem);
+  final sem = normSemester(targetSem);
 
-  if (scope == SemesterScope.upcoming) {
-    query = query.eq('status', 'upcoming');
+  final enrollments = (await ref.watch(localRowsProvider(('enrollments', sem)).future))
+      .where((e) => e['user_id'] == user.id)
+      .where((e) => scope != SemesterScope.upcoming || e['status'] == 'upcoming')
+      .map((e) => Map<String, dynamic>.from(e))
+      .toList();
+  if (enrollments.isEmpty) return enrollments;
+
+  final sections = {
+    for (final s in await ref.watch(localRowsProvider(('courses_$sem', null)).future)) '${s['id']}': s,
+  };
+  for (final enr in enrollments) {
+    final sec = sections['${enr['section_id']}'];
+    if (sec == null) continue;
+    enr['faculty_initial'] = sec['faculty_initials'];
+    final sched = sec['schedule_data'];
+    if (sched is List && sched.isNotEmpty && sched.first is Map) {
+      final first = sched.first as Map;
+      enr['time'] = first['time'] ?? '${first['start_time']}-${first['end_time']}';
+      enr['room'] = first['room'];
+    }
   }
-      
-  final data = await query;
-  return (data as List).cast<Map<String, dynamic>>();
+  return enrollments;
 });

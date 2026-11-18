@@ -2,67 +2,123 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
+import '../data/data_providers.dart';
+import '../data/db/app_database.dart';
+import '../data/repos/local_queries.dart';
+import '../data/repos/local_writer.dart';
+import '../data/repos/weekly_grid.dart';
+import '../data/sync/outbox.dart';
+import '../data/sync/scope_catalog.dart';
 import '../models/profile.dart';
 import '../providers/supabase_provider.dart';
-import '../services/cache_service.dart';
-import 'package:ewumate/features/dashboard/dashboard_repository.dart';
+import '../utils/course_utils.dart';
 
 part 'profile_repository.g.dart';
 
+/// Profile + enrollment changes. Reads are local; writes are applied locally at
+/// once and queued (enroll/drop/switch as one atomic server call each), so they
+/// work offline. A server rejection rolls every local part back together.
 class ProfileRepository {
   final SupabaseClient _supabase;
-  final CacheService _cache;
-  final DashboardRepository _dashboardRepo;
+  final AppDatabase _db;
+  final Outbox _outbox;
 
-  ProfileRepository(this._supabase, this._cache, this._dashboardRepo);
+  ProfileRepository(this._supabase, this._db, this._outbox);
 
-  Future<Profile?> getProfile(String userId, {bool forceRefresh = true}) async {
-    if (!forceRefresh) {
-      final cached = _cache.getCachedProfile(userId);
-      if (cached != null) {
-        _fetchAndCache(userId);
-        return Profile.fromJson(cached);
-      }
+  LocalWriter _writer(String userId) => LocalWriter(_db, _outbox, userId);
+
+  /// Columns the server computes (triggers/RPCs). Never sent from a queued
+  /// profile edit, so an offline edit cannot overwrite newer server values.
+  static const _serverManaged = {
+    'cgpa', 'total_credits_earned', 'enrolled_sections', 'enrolled_sections_next', 'enrolled_credits',
+    'enrolled_credits_next', 'total_courses_completed', 'past_history', 'last_active_at', 'app_open_count',
+    'app_version', 'updated_at', 'created_at', 'track', 'semester_type', 'sync_xid',
+  };
+
+  static Profile? _parse(Map<String, dynamic>? j) {
+    if (j == null) return null;
+    try {
+      return Profile.fromJson(j);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[ProfileRepository] bad profile row: $e');
+      return null;
     }
-
-    return await _fetchAndCache(userId);
   }
 
-  Future<Profile?> _fetchAndCache(String userId) async {
+  Future<Profile?> getProfile(String userId, {bool forceRefresh = true}) async {
+    final local = _parse(await _db.getRow('profiles', userId));
+    if (local != null) return local;
+    // Nothing synced yet on this device (first sign-in): one direct read.
     try {
-      final data = await _supabase
-          .from('profiles')
-          .select()
-          .eq('id', userId)
-          .maybeSingle();
-
+      final data = await _supabase.from('profiles').select().eq('id', userId).maybeSingle();
       if (data == null) return null;
-
-      // Update Cache
-      await _cache.cacheProfile(userId, data);
-
-      return Profile.fromJson(data);
+      await _db.putRow(tbl: 'profiles', rowId: userId, scope: ScopeCatalog.userScope(userId), data: data);
+      return _parse(data);
     } catch (e) {
       throw Exception('Failed to fetch profile: $e');
     }
   }
 
   Future<void> updateProfile(Profile profile) async {
-    try {
-      // 1. Sanitize Name (Capitalize each word + trim)
-      final sanitizedName = profile.fullName?.trim().split(' ')
-          .map((word) => word.isNotEmpty 
-              ? word[0].toUpperCase() + word.substring(1).toLowerCase() 
-              : '')
-          .join(' ') ?? '';
-      
-      final sanitizedProfile = profile.copyWith(fullName: sanitizedName);
+    final sanitizedName = profile.fullName
+            ?.trim()
+            .split(' ')
+            .map((w) => w.isNotEmpty ? w[0].toUpperCase() + w.substring(1).toLowerCase() : '')
+            .join(' ') ??
+        '';
+    final row = profile.copyWith(fullName: sanitizedName).toJson()
+      ..removeWhere((k, _) => _serverManaged.contains(k));
+    await _writer(profile.id).upsert('profiles', row, label: 'Profile update');
+  }
 
-      await _supabase.from('profiles').upsert(sanitizedProfile.toJson());
-      await _cache.cacheProfile(sanitizedProfile.id, sanitizedProfile.toJson());
-    } catch (e) {
-      throw Exception('Failed to update profile: $e');
+  // ---------------------------------------------------------------------------
+  // Enrollment
+  // ---------------------------------------------------------------------------
+
+  Future<List<Map<String, dynamic>>> _myEnrollments(String userId, String sem) async =>
+      (await _db.getRows('enrollments', semester: sem)).where((e) => e['user_id'] == userId).toList();
+
+  /// Optimistic changes to the profile's section arrays and the weekly grid,
+  /// recomputed locally from [enrollmentsAfter] (same rules as the server).
+  Future<List<LocalChange>> _derivedChanges(
+    String userId,
+    String sem,
+    List<Map<String, dynamic>> enrollmentsAfter,
+  ) async {
+    final changes = <LocalChange>[];
+    final profile = await _db.getRow('profiles', userId);
+    final track = CourseUtils.normalizeTrack('${profile?['track'] ?? profile?['semester_type'] ?? ''}');
+    final active = await LocalQueries(_db).activeSemester(track);
+    final currentRaw = '${active?['current_semester_code'] ?? ''}';
+    final isCurrent = normSemester(currentRaw) == sem;
+    final isNext = normSemester('${active?['next_semester_code'] ?? ''}') == sem;
+    final sectionIds = enrollmentsAfter.map((e) => '${e['section_id']}').where((s) => s != 'null').toList();
+
+    if (profile != null && (isCurrent || isNext)) {
+      changes.add(LocalChange('profiles', userId, {
+        ...profile,
+        isCurrent ? 'enrolled_sections' : 'enrolled_sections_next': sectionIds,
+      }));
     }
+
+    if (isCurrent) {
+      final states = (await _db.getRows('user_semester_states', semester: sem)).where((r) => r['user_id'] == userId);
+      final existing = states.firstOrNull;
+      final semCode = '${existing?['semester_code'] ?? currentRaw}';
+      final sections = <Map<String, dynamic>>[];
+      for (final id in sectionIds) {
+        final s = await _db.getRow('courses_$sem', id);
+        if (s != null) sections.add(s);
+      }
+      changes.add(LocalChange('user_semester_states', '$userId|$semCode', {
+        ...?existing,
+        'user_id': userId,
+        'semester_code': semCode,
+        'weekly_grid_cache': buildWeeklyGrid(sections, programCode: profile?['program_code'] as String?),
+      }));
+    }
+    return changes;
   }
 
   Future<void> enrollCourseSection({
@@ -70,48 +126,40 @@ class ProfileRepository {
     required String courseCode,
     required String semesterCode,
     required String sectionId,
-      required String sectionNumber,
-      required List<String> currentSections,
-    }) async {
-      try {
-        // 1. Update Profile Array
-        final updatedSections = List<String>.from(currentSections)..add(sectionId);
+    required String sectionNumber,
+    required List<String> currentSections,
+  }) async {
+    final sem = normSemester(semesterCode);
+    final section = await _db.getRow('courses_$sem', sectionId);
+    final mine = await _myEnrollments(userId, sem);
+    final existing = mine.where((e) => CourseUtils.areEquivalent('${e['course_code']}', courseCode)).firstOrNull;
+    final id = '${existing?['id'] ?? const Uuid().v4()}';
 
-        // 1. Update Profile enrolled_sections sequentially
-        await _supabase
-            .from('profiles')
-            .update({'enrolled_sections': updatedSections})
-            .eq('id', userId);
+    final row = <String, dynamic>{
+      ...?existing,
+      'id': id,
+      'user_id': userId,
+      'course_code': existing?['course_code'] ?? section?['course_code'] ?? courseCode,
+      'semester_code': sem,
+      'section_id': sectionId,
+      'section': sectionNumber,
+      'status': 'enrolled',
+      '_pending': true,
+    };
+    final after = [...mine.where((e) => e['id'] != id), row];
 
-        // 2. Insert the enrollment record
-        await _supabase.from('enrollments').insert({
-          'user_id': userId,
-          'course_code': courseCode,
-          'semester_code': semesterCode,
-          'section_id': sectionId,
-          'section': sectionNumber,
-          'status': 'enrolled',
-        });
-        
-        // 3. Force Reset Database Weekly Schedule cache (Trigger re-sync)
-        await _supabase
-            .from('user_semester_states')
-            .upsert({
-              'user_id': userId,
-              'semester_code': semesterCode,
-              'weekly_grid_cache': null,
-            }, onConflict: 'user_id,semester_code');
-
-        // 4. Proactive Sync Trigger (Rebuilds dashboard schedule immediately)
-        await _dashboardRepo.syncWeeklySchedule(userId);
-
-        // 4. Clear local Hive enrollment caches
-        _cache.clearEnrollmentCache(userId, semesterCode);
-
-      await _fetchAndCache(userId);
-    } catch (e) {
-      throw Exception('Failed to enroll course: $e');
-    }
+    await _writer(userId).rpc(
+      'v2_enroll_section',
+      {
+        'p_semester': semesterCode,
+        'p_course_code': courseCode,
+        'p_section_id': sectionId,
+        'p_expected_schedule': section?['schedule_data'],
+        'p_client_id': existing == null ? id : null,
+      },
+      changes: [LocalChange('enrollments', id, row), ...await _derivedChanges(userId, sem, after)],
+      label: 'Enroll in $courseCode (section $sectionNumber)',
+    );
   }
 
   Future<void> dropCourseSection({
@@ -120,43 +168,20 @@ class ProfileRepository {
     required String semesterCode,
     required List<String> currentSections,
   }) async {
-    try {
-      final updatedSections = List<String>.from(currentSections)..remove(sectionId);
-      
-      // 1. Update Profile enrolled_sections sequentially
-      await _supabase
-          .from('profiles')
-          .update({'enrolled_sections': updatedSections})
-          .eq('id', userId);
+    final sem = normSemester(semesterCode);
+    final mine = await _myEnrollments(userId, sem);
+    final dropped = mine.where((e) => e['section_id'] == sectionId).toList();
+    final after = mine.where((e) => e['section_id'] != sectionId).toList();
 
-      // 2. Delete the enrollment record
-      await _supabase
-          .from('enrollments')
-          .delete()
-          .eq('user_id', userId)
-          .eq('section_id', sectionId);
-      
-      // 3. Force Reset Database Weekly Schedule cache
-      await _supabase
-          .from('user_semester_states')
-          .upsert({
-            'user_id': userId,
-            'semester_code': semesterCode,
-            'weekly_grid_cache': null,
-          }, onConflict: 'user_id,semester_code');
-
-      // 4. Proactive Sync Trigger (Ensures schedule is correct after drop)
-      await _dashboardRepo.syncWeeklySchedule(userId);
-
-      // 4. Clear local Hive caches
-      _cache.clearEnrollmentCache(userId, semesterCode);
-      _cache.clearSemesterProgressCache(userId, semesterCode);
-
-      // 4. Force refresh local profile cache
-      await _fetchAndCache(userId);
-    } catch (e) {
-      throw Exception('Failed to drop course: $e');
-    }
+    await _writer(userId).rpc(
+      'v2_drop_section',
+      {'p_semester': semesterCode, 'p_section_id': sectionId},
+      changes: [
+        for (final e in dropped) LocalChange('enrollments', '${e['id']}', null),
+        ...await _derivedChanges(userId, sem, after),
+      ],
+      label: 'Drop ${dropped.firstOrNull?['course_code'] ?? 'course'}',
+    );
   }
 
   Future<void> switchCourseSection({
@@ -165,125 +190,71 @@ class ProfileRepository {
     required String semesterCode,
     required String oldSectionId,
     required String newSectionId,
-      required String newSectionNumber,
-      required List<String> currentSections,
-    }) async {
-      try {
-        final updatedSections = List<String>.from(currentSections)
-          ..remove(oldSectionId)
-          ..add(newSectionId);
+    required String newSectionNumber,
+    required List<String> currentSections,
+  }) async {
+    final sem = normSemester(semesterCode);
+    final section = await _db.getRow('courses_$sem', newSectionId);
+    final mine = await _myEnrollments(userId, sem);
+    final existing = mine
+        .where((e) => e['section_id'] == oldSectionId || CourseUtils.areEquivalent('${e['course_code']}', courseCode))
+        .firstOrNull;
+    final id = '${existing?['id'] ?? const Uuid().v4()}';
+    final row = <String, dynamic>{
+      ...?existing,
+      'id': id,
+      'user_id': userId,
+      'course_code': existing?['course_code'] ?? courseCode,
+      'semester_code': existing?['semester_code'] ?? sem,
+      'section_id': newSectionId,
+      'section': newSectionNumber,
+      'status': 'enrolled',
+      '_pending': true,
+    };
+    final after = [...mine.where((e) => e['id'] != id), row];
 
-        // 1. Update Profile enrolled_sections
-        await _supabase
-            .from('profiles')
-            .update({'enrolled_sections': updatedSections})
-            .eq('id', userId);
-
-        // 2. Atomic Upsert: Update if exists, otherwise Insert
-        // This is much safer than delete+insert as it handles conflicts natively
-        await _supabase
-            .from('enrollments')
-            .upsert({
-              'user_id': userId,
-              'course_code': courseCode,
-              'semester_code': semesterCode,
-              'section_id': newSectionId,
-              'section': newSectionNumber,
-              'status': 'enrolled', // Ensure it's marked as enrolled
-            }, onConflict: 'user_id,semester_code,course_code');
-
-        // 3. Force Reset Database Weekly Schedule cache
-        await _supabase
-            .from('user_semester_states')
-            .upsert({
-              'user_id': userId,
-              'semester_code': semesterCode,
-              'weekly_grid_cache': null,
-            }, onConflict: 'user_id,semester_code');
-
-        // 4. Proactive Sync Trigger (Ensures new section timing is reflected)
-        await _dashboardRepo.syncWeeklySchedule(userId);
-
-        // 4. Clear local Hive caches
-        _cache.clearEnrollmentCache(userId, semesterCode);
-
-      await _fetchAndCache(userId);
-    } catch (e) {
-      throw Exception('Failed to switch section: $e');
-    }
+    await _writer(userId).rpc(
+      'v2_switch_section',
+      {
+        'p_semester': semesterCode,
+        'p_course_code': courseCode,
+        'p_old_section_id': oldSectionId,
+        'p_new_section_id': newSectionId,
+        'p_expected_schedule': section?['schedule_data'],
+      },
+      changes: [LocalChange('enrollments', id, row), ...await _derivedChanges(userId, sem, after)],
+      label: 'Switch $courseCode to section $newSectionNumber',
+    );
   }
 
-  Stream<Profile?> streamProfile(String userId) async* {
-    final cached = _cache.getCachedProfile(userId);
-    if (cached != null) {
-      yield Profile.fromJson(cached);
-    }
-    
-    // Background refresh immediately to break any stale caches
-    _fetchAndCache(userId).then((fresh) {
-      if (fresh != null && !kIsWeb) {
-        // This will naturally trigger the stream below if realtime is active,
-        // but we yield it anyway just in case.
-      }
-    });
+  Stream<Profile?> streamProfile(String userId) => _db.watchRow('profiles', userId).map(_parse);
 
-    try {
-      await for (final event in _supabase
-          .from('profiles')
-          .stream(primaryKey: ['id'])
-          .eq('id', userId)) {
-        if (event.isNotEmpty) {
-          final data = event.first;
-          _cache.cacheProfile(userId, data);
-          yield Profile.fromJson(data);
-        }
-      }
-    } catch (e) {
-      // Offline fallback already handled by initial yield
-    }
-  }
-
+  /// Once per app run (SessionGuardian). Online only; skipped silently offline.
   Future<void> recordActivity(String userId) async {
     try {
-      // 1. Get current app version
       final packageInfo = await PackageInfo.fromPlatform();
-      final currentVersion = packageInfo.version;
-
-      // 2. Perform atomic single-query update (app_open_count, last_active_at, app_version)
-      try {
-        await _supabase.rpc('record_app_open', params: {
-          'p_user_id': userId,
-          'p_app_version': currentVersion,
-        });
-      } catch (_) {
-        // Fallback for backward compatibility if RPC is not yet executed
-        await _supabase.rpc('increment_app_open_count', params: {
-          'p_user_id': userId,
-        });
-        await _supabase.from('profiles').update({
-          'app_version': currentVersion,
-          'last_active_at': DateTime.now().toIso8601String(),
-        }).eq('id', userId);
-      }
+      await _supabase.rpc('record_app_open', params: {
+        'p_user_id': userId,
+        'p_app_version': packageInfo.version,
+      });
     } catch (e) {
-      if (kDebugMode) print('Failed to record activity: $e');
+      if (kDebugMode) debugPrint('Failed to record activity: $e');
     }
   }
 }
 
 @riverpod
 ProfileRepository profileRepository(Ref ref) {
-  final supabase = ref.watch(supabaseClientProvider);
-  final cache = ref.watch(cacheServiceProvider);
-  final dashboardRepo = ref.watch(dashboardRepositoryProvider);
-  return ProfileRepository(supabase, cache, dashboardRepo);
+  return ProfileRepository(
+    ref.watch(supabaseClientProvider),
+    ref.watch(appDatabaseProvider),
+    ref.watch(outboxProvider),
+  );
 }
 
 @Riverpod(keepAlive: true)
 Stream<Profile?> userProfile(Ref ref) {
-  final supabase = ref.watch(supabaseClientProvider);
-  final user = supabase.auth.currentUser;
-  if (user == null) return Stream.value(null);
-  
-  return ref.watch(profileRepositoryProvider).streamProfile(user.id);
+  final uid = ref.watch(currentUserIdProvider);
+  if (uid == null) return Stream.value(null);
+  return ref.watch(profileRepositoryProvider).streamProfile(uid);
 }

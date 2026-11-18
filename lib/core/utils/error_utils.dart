@@ -39,7 +39,19 @@ class AuthErrorUtils {
       return 'Session expired. Please log in again.';
     }
 
-    // 3. Fallback for everything else
+    // 3. Clean specific business / server messages
+    final rawMsg = error.toString().replaceFirst(RegExp(r'^(Exception:\s*|Error:\s*)'), '').trim();
+    if (rawMsg.isNotEmpty && 
+        !rawMsg.startsWith('{') && 
+        !rawMsg.contains('NoSuchMethodError') && 
+        !rawMsg.contains('Null check operator') &&
+        !rawMsg.contains('RangeError') &&
+        !rawMsg.contains('TypeError') &&
+        rawMsg.length < 300) {
+      return rawMsg;
+    }
+
+    // 4. Fallback for everything else
     return 'Something went wrong. Please try again later.';
   }
 }

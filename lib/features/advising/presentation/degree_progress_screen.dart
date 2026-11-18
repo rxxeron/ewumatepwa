@@ -34,12 +34,7 @@ class _DegreeProgressScreenState extends ConsumerState<DegreeProgressScreen> {
   @override
   void initState() {
     super.initState();
-    _refreshTimer = Timer.periodic(const Duration(minutes: 3), (timer) {
-      if (mounted) {
-        ref.invalidate(profileRepositoryProvider);
-        ref.invalidate(allSemesterSummariesProvider);
-      }
-    });
+    // No polling: this screen's data is local and updates when the sync engine pulls a change.
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {

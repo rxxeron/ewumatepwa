@@ -6,58 +6,43 @@ import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../core/config/supabase_config.dart';
+import '../../core/data/data_providers.dart';
+import '../../core/data/db/app_database.dart';
+import '../../core/data/repos/local_queries.dart';
 import '../../core/utils/course_utils.dart';
-import '../../core/services/cache_service.dart';
-import '../../core/services/redis_service.dart';
 
 final dashboardRepositoryProvider = Provider<DashboardRepository>((ref) {
-  final cache = ref.watch(cacheServiceProvider);
-  final redis = ref.watch(redisServiceProvider);
   return DashboardRepository(
     supabase: Supabase.instance.client,
-    cache: cache,
-    redis: redis,
+    db: ref.watch(appDatabaseProvider),
   );
 });
 
+/// Builds the dashboard/routine payloads from the LOCAL database (synced by the
+/// sync engine). No network, no TTL caches: the data changes when the server does.
 class DashboardRepository {
   final SupabaseClient _supabase;
-  final CacheService? _cache;
-  final RedisService? _redis;
+  final LocalQueries _local;
 
   DashboardRepository({
     SupabaseClient? supabase,
-    CacheService? cache,
-    RedisService? redis,
+    required AppDatabase db,
   })  : _supabase = supabase ?? Supabase.instance.client,
-        _cache = cache,
-        _redis = redis;
+        _local = LocalQueries(db);
 
-  // In-memory cache for active_semester date ranges (12-hour TTL) to prevent repeated DB reads
-  static final Map<String, (Map<String, dynamic> dates, DateTime cachedAt)> _activeSemesterDatesCache = {};
-  static const Duration _datesCacheTtl = Duration(hours: 12);
+  String? get _userId => _supabase.auth.currentUser?.id;
 
-  Future<Map<String, dynamic>?> _getCachedActiveSemesterDates(String track) async {
-    final normalizedTrack = CourseUtils.normalizeTrack(track);
-    final entry = _activeSemesterDatesCache[normalizedTrack];
-    if (entry != null && DateTime.now().difference(entry.$2) < _datesCacheTtl) {
-      return entry.$1;
-    }
-    try {
-      final res = await _supabase
-          .from('active_semester')
-          .select('classes_end_date, classes_start_date')
-          .eq('track', normalizedTrack)
-          .maybeSingle();
-      if (res != null) {
-        _activeSemesterDatesCache[normalizedTrack] = (res, DateTime.now());
-      }
-      return res;
-    } catch (e) {
-      debugPrint('[DashboardRepository] Error fetching active_semester dates for $normalizedTrack: $e');
-      return entry?.$1;
-    }
+  /// Semesters whose weekly grid was found empty this run: ask the server to
+  /// build it once (it arrives through sync), instead of on every refresh.
+  static final Set<String> _gridRebuildRequested = {};
+
+  void _requestGridOnce(String userId, String semesterCode) {
+    if (!_gridRebuildRequested.add('$userId|${CourseUtils.cleanSemester(semesterCode)}')) return;
+    unawaited(syncWeeklySchedule(userId));
   }
+
+  Future<Map<String, dynamic>?> _getCachedActiveSemesterDates(String track) =>
+      _local.activeSemester(CourseUtils.normalizeTrack(track));
 
   /// The New Simplified Dashboard Fetch
   /// 1. Weekly Grid (user_semester_states)
@@ -70,9 +55,7 @@ class DashboardRepository {
     String? track,
     DateTime? profileUpdatedAt,
   }) async {
-    final user = _supabase.auth.currentUser;
-    final lastUserId = _cache?.getLastUserId();
-    final effectiveUserId = user?.id ?? lastUserId;
+    final effectiveUserId = _userId;
     if (effectiveUserId == null) return {};
 
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
@@ -85,42 +68,7 @@ class DashboardRepository {
         programName.contains('LLB') ||
         programName.contains('BI');
 
-    // Smart Invalidation Cache Check
-    final cache = _cache;
-    if (cache != null) {
-      final safeSem = CourseUtils.cleanSemester(semesterCode);
-      final cached = cache.getCachedDashboardSchedule(effectiveUserId, safeSem, dateStr: dateStr);
-      if (cached != null) {
-        final cacheDateStr = cached['dateStr'] as String?;
-        if (cacheDateStr == dateStr) {
-          final cacheUpdatedAtStr = cached['_cache_updated_at'] as String?;
-          if (cacheUpdatedAtStr != null) {
-            final cacheUpdatedAt = DateTime.tryParse(cacheUpdatedAtStr);
-            if (cacheUpdatedAt != null) {
-              bool isStale = false;
-              // 24-hour baseline
-              if (DateTime.now().difference(cacheUpdatedAt).inHours >= 24) {
-                isStale = true;
-              }
-              // Profile-linked invalidation
-              else if (profileUpdatedAt != null && profileUpdatedAt.isAfter(cacheUpdatedAt)) {
-                isStale = true;
-              }
-              
-              if (!isStale) {
-                debugPrint('[DashboardRepository] Serving strictly from Smart Cache');
-                if (cached['date'] != null && cached['date'] is String) {
-                  cached['date'] = DateTime.tryParse(cached['date']) ?? date;
-                }
-                return cached;
-              }
-            }
-          }
-        }
-      }
-    }
-
-    try {
+    {
       // 1. Fetch relevant track configuration
       final standardTable = CourseUtils.semesterTable(
         'calendar',
@@ -133,73 +81,27 @@ class DashboardRepository {
           ? CourseUtils.semesterTable('calendar', semesterCode, cycleType: 'bi_semester')
           : null;
 
+      final weekAgo = DateTime.now().subtract(const Duration(days: 7));
       final results = await Future.wait<dynamic>([
-        // [0] Weekly grid cache
-        _supabase
-            .from('user_semester_states')
-            .select('weekly_grid_cache')
-            .eq('user_id', effectiveUserId)
-            .eq('semester_code', semesterCode)
-            .maybeSingle(),
+        // [0] Weekly grid (row shaped like the old select)
+        _local.weeklyGrid(effectiveUserId, semesterCode).then((g) => {'weekly_grid_cache': g}),
         // [1] Date-specific exceptions
-        _supabase
-            .from('schedule_exceptions')
-            .select()
-            .eq('user_id', effectiveUserId)
-            .eq('date', dateStr),
+        _local.exceptions(effectiveUserId, date: dateStr),
         // [2] Standard (Tri) events for dateStr
-        Future<List<dynamic>>(() async {
-          final cleanSem = CourseUtils.cleanSemester(semesterCode).toLowerCase();
-          if (_redis != null) {
-            try {
-              final cachedCal = await _redis!.getList('global:calendar:$cleanSem');
-              if (cachedCal != null && cachedCal.isNotEmpty) {
-                return cachedCal.where((e) => e is Map && e['event_date'] == dateStr).toList();
-              }
-            } catch (_) {}
-          }
-          try {
-            return await _supabase.from(standardTable).select().eq('event_date', dateStr);
-          } catch (_) {
-            return <dynamic>[];
-          }
-        }),
+        _local.calendarEvents(standardTable, date: dateStr),
         // [3] Professional (Bi) events for dateStr
-        (phrmTable != null)
-            ? Future<List<dynamic>>(() async {
-                final cleanSem = CourseUtils.cleanSemester(semesterCode).toLowerCase();
-                if (_redis != null) {
-                  try {
-                    final cachedCal = await _redis!.getList('global:calendar:$cleanSem:phrm_llb');
-                    if (cachedCal != null && cachedCal.isNotEmpty) {
-                      return cachedCal.where((e) => e is Map && e['event_date'] == dateStr).toList();
-                    }
-                  } catch (_) {}
-                }
-                try {
-                  return await _supabase.from(phrmTable).select().eq('event_date', dateStr);
-                } catch (_) {
-                  return <dynamic>[];
-                }
-              })
-            : Future.value(<dynamic>[]),
-        // [4] Tasks
-        _supabase
-            .from('tasks')
-            .select()
-            .eq('user_id', effectiveUserId)
-            .or('semester_code.eq.$semesterCode,semester_code.is.null')
-            .eq('is_completed', false)
-            .gte(
-              'due_date',
-              DateTime.now()
-                  .subtract(const Duration(days: 7))
-                  .toUtc()
-                  .toIso8601String(),
-            )
-            .order('due_date', ascending: true)
-            .limit(10),
-        // [5, 6] Classes End/Start Dates (cached with 12h TTL)
+        phrmTable != null ? _local.calendarEvents(phrmTable, date: dateStr) : Future.value(<Map<String, dynamic>>[]),
+        // [4] Open tasks due from a week ago on, soonest first, max 10
+        _local.tasks(effectiveUserId, semesterCode: semesterCode).then((all) {
+          final open = all.where((t) {
+            if (t['is_completed'] == true) return false;
+            final due = DateTime.tryParse('${t['due_date']}');
+            return due != null && !due.isBefore(weekAgo);
+          }).toList()
+            ..sort((a, b) => '${a['due_date']}'.compareTo('${b['due_date']}'));
+          return open.take(10).toList();
+        }),
+        // [5, 6] Classes End/Start Dates
         _getCachedActiveSemesterDates('tri_semester'),
         _getCachedActiveSemesterDates('bi_semester'),
       ]);
@@ -234,30 +136,7 @@ class DashboardRepository {
           (results[6] as Map<String, dynamic>?)?['classes_start_date']
               ?.toString();
 
-      if (weeklyGrid.isEmpty) {
-        // Run edge function sync asynchronously in background without halting the dashboard thread
-        unawaited(() async {
-          try {
-            final safeCode = semesterCode.replaceAll(' ', '').replaceAll('_', '');
-            debugPrint('[Dashboard] Triggering background sync-schedule (No-JWT) for: $safeCode');
-            final functionsUrl = '${AppConfig.getSupabaseUrl}/functions/v1';
-            final uri = Uri.parse('$functionsUrl/sync-schedule');
-            await http.post(
-              uri,
-              headers: {
-                'Content-Type': 'application/json',
-                'apikey': AppConfig.getSupabaseAnonKey,
-              },
-              body: jsonEncode({
-                'user_id': effectiveUserId,
-                'semester_code': safeCode,
-              }),
-            );
-          } catch (e) {
-            debugPrint('[Dashboard] Background sync call failed: $e');
-          }
-        }());
-      }
+      if (weeklyGrid.isEmpty) _requestGridOnce(effectiveUserId, semesterCode);
 
       // 2. Evaluate Standard (Tri) Track Local State
       String stdDay = dayName;
@@ -328,14 +207,6 @@ class DashboardRepository {
           'date': date,
           'dateStr': dateStr,
         };
-
-        final cache = _cache;
-        if (cache != null) {
-          final cachePayload = {...payload, 'date': date.toIso8601String()};
-          final safeSem = CourseUtils.cleanSemester(semesterCode);
-          cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload, dateStr: dateStr);
-        }
-
         return payload;
       }
 
@@ -413,29 +284,7 @@ class DashboardRepository {
         'date': date,
         'dateStr': dateStr,
       };
-
-      final cache = _cache;
-      if (cache != null) {
-        final cachePayload = {...payload, 'date': date.toIso8601String()};
-        final safeSem = CourseUtils.cleanSemester(semesterCode);
-        cache.cacheDashboardSchedule(effectiveUserId, safeSem, cachePayload, dateStr: dateStr);
-      }
-
       return payload;
-    } catch (e) {
-      final cache = _cache;
-      if (cache != null) {
-        final safeSem = CourseUtils.cleanSemester(semesterCode);
-        final cached = cache.getCachedDashboardSchedule(effectiveUserId, safeSem);
-        if (cached != null) {
-          debugPrint('[DashboardRepository] Network error, serving from offline cache: $e');
-          if (cached['date'] != null && cached['date'] is String) {
-            cached['date'] = DateTime.tryParse(cached['date']) ?? date;
-          }
-          return cached;
-        }
-      }
-      rethrow;
     }
   }
 
@@ -487,26 +336,16 @@ class DashboardRepository {
     String? track,
   }) async {
     try {
-      String resolvedTrack = track ?? 'tri_semester';
-      if (track == null) {
-        final config = await _supabase
-            .from('active_semester')
-            .select('track')
-            .eq('current_semester_code', semesterCode)
-            .limit(1)
-            .maybeSingle();
-        if (config != null) resolvedTrack = config['track'];
-      }
-
+      final resolvedTrack = track ?? 'tri_semester';
       final tableName = CourseUtils.semesterTable(
         'calendar',
         semesterCode,
         cycleType: resolvedTrack,
       );
-      final res = await _supabase.from(tableName).select();
+      final res = await _local.calendarEvents(tableName);
 
-      if ((res as List).isNotEmpty) {
-        final matches = (res as List).where((d) {
+      if (res.isNotEmpty) {
+        final matches = res.where((d) {
           final dDate = (d['event_date'] ?? d['date'] ?? d['date_string'] ?? '')
               .toString();
           return dDate == dateStr;
@@ -514,14 +353,13 @@ class DashboardRepository {
 
         if (matches.isNotEmpty) {
           // Prioritize holiday match if multiple events exist for this date
-          for (final m in matches) {
-            final ev = m as Map<String, dynamic>;
+          for (final ev in matches) {
             final title = (ev['title'] ?? ev['name'] ?? '').toString().toLowerCase();
             if (_isActualHoliday(ev, title)) {
               return ev;
             }
           }
-          return matches.first as Map<String, dynamic>;
+          return matches.first;
         }
       }
       return null;
@@ -554,24 +392,15 @@ class DashboardRepository {
     DateTime date, {
     String? track,
   }) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return {};
+    final uid = _userId;
+    if (uid == null) return {};
 
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
     final dayName = DateFormat('EEEE').format(date);
 
     final results = await Future.wait<dynamic>([
-      _supabase
-          .from('user_semester_states')
-          .select('weekly_grid_cache')
-          .eq('user_id', user.id)
-          .eq('semester_code', semesterCode)
-          .maybeSingle(),
-      _supabase
-          .from('schedule_exceptions')
-          .select()
-          .eq('user_id', user.id)
-          .eq('date', dateStr),
+      _local.weeklyGrid(uid, semesterCode).then((g) => <String, dynamic>{'weekly_grid_cache': g}),
+      _local.exceptions(uid, date: dateStr),
       _fetchHolidayDirect(semesterCode, dateStr, track: track),
     ]);
 
@@ -633,8 +462,8 @@ class DashboardRepository {
     String? track,
     int daysBack = 0,
   }) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return [];
+    final uid = _userId;
+    if (uid == null) return [];
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -668,81 +497,24 @@ class DashboardRepository {
       }
 
       final results = await Future.wait<dynamic>([
-        _supabase
-            .from('user_semester_states')
-            .select('weekly_grid_cache')
-            .eq('user_id', user.id)
-            .eq('semester_code', semesterCode)
-            .maybeSingle()
-            .catchError((e) { debugPrint('Error in state fetch: $e'); return null; }),
-        _supabase
-            .from('schedule_exceptions')
-            .select()
-            .eq('user_id', user.id)
-            .gte('date', startDateStr)
-            .lte('date', endDateStr)
-            .catchError((e) { debugPrint('Error in exceptions fetch: $e'); return []; }),
-        (standardTable != null)
-            ? _supabase
-                .from(standardTable)
-                .select()
-                .gte('event_date', startDateStr)
-                .lte('event_date', endDateStr)
-                .catchError((e) {
-                debugPrint('Error in standardTable fetch: $e');
-                return [];
-              })
-            : Future.value([]),
-        (phrmTable != null)
-            ? _supabase
-                .from(phrmTable)
-                .select()
-                .gte('event_date', startDateStr)
-                .lte('event_date', endDateStr)
-                .catchError((e) {
-                debugPrint('Error in phrmTable fetch: $e');
-                return [];
-              })
-            : Future.value([]),
+        _local.weeklyGrid(uid, semesterCode).then((g) => <String, dynamic>{'weekly_grid_cache': g}),
+        _local.exceptions(uid, from: startDateStr, to: endDateStr),
+        standardTable != null
+            ? _local.calendarEvents(standardTable, from: startDateStr, to: endDateStr)
+            : Future.value(<Map<String, dynamic>>[]),
+        phrmTable != null
+            ? _local.calendarEvents(phrmTable, from: startDateStr, to: endDateStr)
+            : Future.value(<Map<String, dynamic>>[]),
         _getCachedActiveSemesterDates('tri_semester'),
         _getCachedActiveSemesterDates('bi_semester'),
       ]);
 
-      var weeklyGrid =
+      final weeklyGrid =
           (results[0] as Map<String, dynamic>?)?['weekly_grid_cache']
               as Map<String, dynamic>? ??
           {};
 
-      if (weeklyGrid.isEmpty) {
-        try {
-          final functionsUrl = '${AppConfig.getSupabaseUrl}/functions/v1';
-          final uri = Uri.parse('$functionsUrl/sync-schedule');
-          await http.post(
-            uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': AppConfig.getSupabaseAnonKey,
-            },
-            body: jsonEncode({
-              'user_id': user.id,
-              'semester_code': CourseUtils.cleanSemester(semesterCode),
-            }),
-          );
-          
-          final freshState = await _supabase
-              .from('user_semester_states')
-              .select('weekly_grid_cache')
-              .eq('user_id', user.id)
-              .eq('semester_code', semesterCode)
-              .maybeSingle();
-          if (freshState != null && freshState['weekly_grid_cache'] != null) {
-            weeklyGrid =
-                freshState['weekly_grid_cache'] as Map<String, dynamic>? ?? {};
-          }
-        } catch (e) {
-          debugPrint('[Dashboard] Two-week sync error: $e');
-        }
-      }
+      if (weeklyGrid.isEmpty) _requestGridOnce(uid, semesterCode);
 
       bool isOverallPhrmUser = false;
       for (var dayClasses in weeklyGrid.values) {

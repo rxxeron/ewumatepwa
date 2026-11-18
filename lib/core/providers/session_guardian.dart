@@ -30,12 +30,21 @@ class SessionGuardian {
     _init();
   }
 
+  /// User ids already handled in this app run (app-open recorded, token checked).
+  final Set<String> _handled = {};
+
+  /// Once per app run and per newly signed-in user — not on every
+  /// initialSession / hourly tokenRefreshed event as before.
+  void _onUserPresent(String userId) {
+    if (!_handled.add(userId)) return;
+    _profileRepo.recordActivity(userId);
+    _fcmService.syncToken();
+  }
+
   void _init() {
-    // If a session is already present on startup, record activity and sync token
     final activeSession = _client.auth.currentSession;
     if (activeSession?.user != null) {
-      _profileRepo.recordActivity(activeSession!.user.id);
-      _fcmService.syncToken();
+      _onUserPresent(activeSession!.user.id);
     }
 
     _subscription = _client.auth.onAuthStateChange.listen((data) {
@@ -43,22 +52,14 @@ class SessionGuardian {
       final Session? session = data.session;
 
       if (kDebugMode) {
-        print('[SessionGuardian] 🛡️ Auth Event: ${event.name}');
-        print('[SessionGuardian] 🔑 Session Status: ${session != null ? 'Active' : 'Missing'}');
-        if (session != null) {
-          print('[SessionGuardian] 👤 User: ${session.user.id}');
-          print('[SessionGuardian] ⏳ Expires: ${DateTime.fromMillisecondsSinceEpoch(session.expiresAt! * 1000)}');
-        }
+        print('[SessionGuardian] Auth Event: ${event.name} (${session != null ? 'session' : 'no session'})');
       }
 
-      if (session?.user != null) {
-        // Record activity and sync FCM push token whenever we have a valid session event
-        if (event == AuthChangeEvent.signedIn || 
-            event == AuthChangeEvent.initialSession ||
-            event == AuthChangeEvent.tokenRefreshed) {
-          _profileRepo.recordActivity(session!.user.id);
-          _fcmService.syncToken();
-        }
+      if (session?.user != null && event == AuthChangeEvent.signedIn) {
+        _onUserPresent(session!.user.id);
+      }
+      if (event == AuthChangeEvent.signedOut) {
+        _handled.clear();
       }
 
       switch (event) {

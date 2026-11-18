@@ -51,7 +51,7 @@ final class ProgressRepositoryProvider extends $FunctionalProvider<
 }
 
 String _$progressRepositoryHash() =>
-    r'bdc006a677a5100580fe042b5e3be9266c7ac761';
+    r'8aa724abfe3449d01c20a718862089f0291e2a9a';
 
 @ProviderFor(currentSemesterMarks)
 final currentSemesterMarksProvider = CurrentSemesterMarksProvider._();
@@ -90,7 +90,7 @@ final class CurrentSemesterMarksProvider extends $FunctionalProvider<
 }
 
 String _$currentSemesterMarksHash() =>
-    r'b0af93c206b26bfc41eb3cee5f04c19a8caacbbd';
+    r'561c4e5ec33cd1fd448d3da105af001754fa4639';
 
 @ProviderFor(allSemesterSummaries)
 final allSemesterSummariesProvider = AllSemesterSummariesProvider._();
@@ -129,4 +129,4 @@ final class AllSemesterSummariesProvider extends $FunctionalProvider<
 }
 
 String _$allSemesterSummariesHash() =>
-    r'3553a23f191c83ce107c0e27d5664c24b28939fa';
+    r'feba9a80c1c5fdbe2f9cecc6a5a75506f26c5f59';

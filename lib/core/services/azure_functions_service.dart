@@ -50,7 +50,18 @@ class AzureFunctionsService {
         return {};
       }
     } else {
-      throw Exception('Azure Function failed: ${response.statusCode} - ${response.body}');
+      String errorMessage = 'Server error (${response.statusCode})';
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['error'] != null) {
+          errorMessage = decoded['error'].toString();
+        }
+      } catch (_) {
+        if (response.body.isNotEmpty) {
+          errorMessage = response.body;
+        }
+      }
+      throw Exception(errorMessage);
     }
   }
 

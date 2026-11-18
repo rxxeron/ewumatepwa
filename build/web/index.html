@@ -83,7 +83,27 @@
     };
 
     window.isIOSDevice = function() {
-      return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      return (/iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream) ||
+             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    };
+
+    window.isRxxeronBypassed = function() {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        if (params.get('rxxeron') === 'true') {
+          localStorage.setItem('ewumate_rxxeron_bypass', 'true');
+          return true;
+        }
+        return localStorage.getItem('ewumate_rxxeron_bypass') === 'true';
+      } catch (e) {
+        return false;
+      }
+    };
+
+    window.setRxxeronBypassed = function() {
+      try {
+        localStorage.setItem('ewumate_rxxeron_bypass', 'true');
+      } catch (e) {}
     };
 
     window.triggerPWAInstall = async function() {

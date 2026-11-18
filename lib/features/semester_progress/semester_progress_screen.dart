@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,7 +5,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 
 import '../../core/repositories/auth_repository.dart';
-import '../../core/services/cache_service.dart';
 import '../../core/repositories/course_repository.dart';
 import '../../core/providers/scaffold_provider.dart';
 import '../../core/providers/academic_providers.dart';
@@ -32,18 +30,12 @@ class SemesterProgressScreen extends ConsumerStatefulWidget {
 }
 
 class _SemesterProgressScreenState extends ConsumerState<SemesterProgressScreen> {
-  Timer? _offlineHeartbeat;
   String? _overrideSemesterCode;
 
   @override
   void initState() {
     super.initState();
-    _offlineHeartbeat = Timer.periodic(const Duration(minutes: 2), (timer) {
-      if (mounted) {
-        _pushSyncQueue();
-      }
-    });
-
+    // No polling / queue loop here any more: marks are local and the sync engine sends queued edits.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         OnboardingOverlay.show(
@@ -53,46 +45,6 @@ class _SemesterProgressScreenState extends ConsumerState<SemesterProgressScreen>
         );
       }
     });
-  }
-
-  Future<void> _pushSyncQueue() async {
-    final user = ref.read(currentUserProvider);
-    if (user == null) return;
-    
-    final cacheService = ref.read(cacheServiceProvider);
-    final repo = ref.read(semesterProgressRepositoryProvider);
-    final queue = cacheService.getSyncQueue(user.id);
-    
-    if (queue.isEmpty) return;
-
-    bool anySuccess = false;
-    final Set<String> updatedSemesters = {};
-    for (final item in queue) {
-      if (item['action'] == 'save_course_marks') {
-        try {
-          final sem = item['semesterCode']?.toString() ?? '';
-          await repo.saveCourseMarks(user.id, sem, Map<String, dynamic>.from(item['data']));
-          await cacheService.removeQueueItem(user.id, item['data']['course_code']); 
-          if (sem.isNotEmpty) updatedSemesters.add(sem);
-          anySuccess = true;
-        } catch (e) {
-          if (kDebugMode) debugPrint('[Offline Sync] Still offline for semester marks');
-        }
-      }
-    }
-    
-    if (anySuccess && mounted) {
-      RefreshUtils.refreshAcademicData(ref);
-      for (final sem in updatedSemesters) {
-        ref.invalidate(semesterProgressDataProvider(sem));
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _offlineHeartbeat?.cancel();
-    super.dispose();
   }
 
   String _formatSemesterTitle(String raw) {
@@ -191,7 +143,7 @@ class _SemesterProgressScreenState extends ConsumerState<SemesterProgressScreen>
                 icon: Icon(Icons.refresh_rounded, color: colors.textPrimary),
                 onPressed: () async {
                   HapticFeedback.lightImpact();
-                  await _pushSyncQueue();
+                  await RefreshUtils.syncNow(ref);
                   RefreshUtils.refreshAcademicData(ref);
                   ref.invalidate(semesterProgressDataProvider(activeSemCode));
                 },
@@ -228,7 +180,7 @@ class _SemesterProgressScreenState extends ConsumerState<SemesterProgressScreen>
 
               return RefreshIndicator(
                 onRefresh: () async {
-                  await _pushSyncQueue();
+                  await RefreshUtils.syncNow(ref);
                   RefreshUtils.refreshAcademicData(ref);
                   ref.invalidate(semesterProgressDataProvider(activeSemCode));
                 },
@@ -246,7 +198,7 @@ class _SemesterProgressScreenState extends ConsumerState<SemesterProgressScreen>
                               icon: Icons.school_outlined,
                               actionLabel: 'Sync Portal Routine',
                               onAction: () async {
-                                await _pushSyncQueue();
+                                await RefreshUtils.syncNow(ref);
                                 RefreshUtils.refreshAcademicData(ref);
                                 ref.invalidate(semesterProgressDataProvider(activeSemCode));
                               },

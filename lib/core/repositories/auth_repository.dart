@@ -3,6 +3,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../providers/supabase_provider.dart';
 import '../services/cache_service.dart';
+import '../data/data_providers.dart';
 import '../models/profile.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -13,7 +14,10 @@ class AuthRepository {
   final SupabaseClient _supabase;
   final CacheService _cache;
 
-  AuthRepository(this._supabase, this._cache);
+  /// Local cleanup run before the session ends (drop the user's local data).
+  final Future<void> Function()? _beforeSignOut;
+
+  AuthRepository(this._supabase, this._cache, [this._beforeSignOut]);
 
   // Observable stream of the current Auth state
   Stream<AuthState> get authStateChanges => _supabase.auth.onAuthStateChange;
@@ -67,6 +71,9 @@ class AuthRepository {
 
   // Sign out
   Future<void> signOut() async {
+    try {
+      await _beforeSignOut?.call();
+    } catch (_) {}
     await _cache.clearAll();
     try {
       await _supabase.auth.signOut();
@@ -159,7 +166,10 @@ class AuthRepository {
 @riverpod
 AuthRepository authRepository(Ref ref) {
   final cache = ref.watch(cacheServiceProvider);
-  return AuthRepository(ref.watch(supabaseClientProvider), cache);
+  return AuthRepository(ref.watch(supabaseClientProvider), cache, () async {
+    await ref.read(syncCoordinatorProvider)?.unregisterPush();
+    await ref.read(appDatabaseProvider).clearUserData();
+  });
 }
 
 @riverpod

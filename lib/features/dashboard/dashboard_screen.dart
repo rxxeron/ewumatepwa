@@ -3,8 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:drift/drift.dart' show StringExpressionOperators, BooleanExpressionOperators;
+import '../../core/data/data_providers.dart';
 
 import '../../core/models/task.dart';
+import '../../core/providers/connectivity_provider.dart';
 import '../../core/providers/scaffold_provider.dart';
 import '../../core/services/fcm_service.dart';
 import '../../core/theme/ewu_theme_extension.dart';
@@ -19,8 +22,9 @@ import '../auth/auth_providers.dart';
 import '../tasks/presentation/widgets/add_task_bottom_sheet.dart';
 import 'controllers/dashboard_controller.dart';
 import 'dashboard_logic.dart';
-import 'widgets/dashboard_banner_tray.dart';
+import 'pwa_install_banner.dart';
 import 'widgets/pre_course_assessment_dialog.dart';
+import 'widgets/dashboard_banner_tray.dart';
 import 'widgets/dashboard_exam_timeline.dart';
 import 'widgets/dashboard_header.dart';
 import 'widgets/dashboard_overdue_checkpoint.dart';
@@ -28,7 +32,6 @@ import 'widgets/dashboard_schedule_timeline.dart';
 import 'widgets/dashboard_tasks_preview.dart';
 import 'widgets/pending_attendance_widget.dart';
 import 'widgets/remote_promo_banner.dart';
-import 'pwa_install_banner.dart';
 
 /// Clean, modularized DashboardScreen (<250 lines).
 /// Delegates data mutations, caching, and background jobs to [DashboardController].
@@ -65,14 +68,35 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       }
     });
 
+    // Local recompute only ("next class" moves with time); no network involved.
     _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       if (mounted) _controller.refreshDashboard(ref: ref, isSilent: true);
     });
+
+    // Re-derive immediately when the underlying local rows change (sync or an edit).
+    final db = ref.read(appDatabaseProvider);
+    _dataChanges = (db.select(db.syncedRows)
+          ..where((t) =>
+              t.tbl.isIn(const ['user_semester_states', 'schedule_exceptions', 'tasks', 'active_semester', 'enrollments']) |
+              t.tbl.like('calendar\\_%', escapeChar: '\\')))
+        .watch()
+        .skip(1)
+        .listen((_) {
+      _changeDebounce?.cancel();
+      _changeDebounce = Timer(const Duration(milliseconds: 400), () {
+        if (mounted) _controller.refreshDashboard(ref: ref, isSilent: true);
+      });
+    });
   }
+
+  StreamSubscription<dynamic>? _dataChanges;
+  Timer? _changeDebounce;
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _changeDebounce?.cancel();
+    _dataChanges?.cancel();
     super.dispose();
   }
 
@@ -274,7 +298,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             actions: [
               IconButton(
                 icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-                onPressed: () => _controller.refreshDashboard(ref: ref, isSilent: false),
+                onPressed: () => _controller.refreshDashboard(ref: ref, isSilent: false, isManual: true),
               ),
             ],
           ),
@@ -285,9 +309,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             email: user.email,
             onAvatarTap: () => ref.read(scaffoldKeyProvider).currentState?.openDrawer(),
           ),
+          if (ref.watch(connectivityProvider).value == false)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.35)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.wifi_off_rounded, color: Colors.amber, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "You're offline. Viewing saved schedule & data.",
+                      style: GoogleFonts.sora(fontSize: 11, color: Colors.amber, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
-              onRefresh: () => _controller.refreshDashboard(ref: ref, isSilent: false),
+              onRefresh: () => _controller.refreshDashboard(ref: ref, isSilent: false, isManual: true),
               color: colors.primaryCyan,
               backgroundColor: colors.surfaceNavyBlue,
               child: state.lastValidScheduleData == null

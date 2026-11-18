@@ -51,4 +51,4 @@ final class ActiveSemesterRepositoryProvider extends $FunctionalProvider<
 }
 
 String _$activeSemesterRepositoryHash() =>
-    r'0a63013cc1bad43fc447e960d26c9f184487ad6b';
+    r'b686c8e7ca931b0c43202c8c71abe51b8854e078';
