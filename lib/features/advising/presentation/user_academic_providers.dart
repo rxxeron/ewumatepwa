@@ -134,9 +134,11 @@ final courseFacultiesProvider = FutureProvider.autoDispose.family<List<String>, 
   }
 });
 
-final generationTrackerProvider = StreamProvider.family<Map<String, dynamic>?, String>((ref, genId) async* {
+final generationTrackerProvider = StreamProvider.autoDispose.family<Map<String, dynamic>?, String>((ref, genId) async* {
   final supabase = ref.watch(supabaseClientProvider);
-  
+  var disposed = false;
+  ref.onDispose(() => disposed = true);
+
   // Try to use Supabase Realtime Stream
   try {
     final stream = supabase
@@ -144,20 +146,21 @@ final generationTrackerProvider = StreamProvider.family<Map<String, dynamic>?, S
         .stream(primaryKey: ['id'])
         .eq('id', genId)
         .map((event) => event.isEmpty ? null : event.first);
-        
+
     yield* stream;
   } catch (e) {
-    // Fallback to manual polling every 2 seconds if Stream fails (e.g. Realtime not enabled)
-    while (true) {
+    // Fallback to bounded polling (max 2 minutes) if Realtime fails
+    for (var attempt = 0; attempt < 60 && !disposed; attempt++) {
       await Future.delayed(const Duration(seconds: 2));
+      if (disposed) break;
       final res = await supabase
           .from('schedule_generations')
-          .select()
+          .select('id, status, count, courses, created_at')
           .eq('id', genId)
           .maybeSingle();
-      
+
       yield res;
-      
+
       // Stop polling if complete or failed
       if (res != null && (res['status'] == 'completed' || res['status'] == 'failed')) {
         break;

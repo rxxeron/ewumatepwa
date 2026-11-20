@@ -113,11 +113,14 @@ class CourseRepository {
 
     // Semester not kept on this device: read from the server (online only).
     try {
-      final fuzzyBase = base.split('').join('%');
       final orClause = alt.isNotEmpty
-          ? 'course_code.ilike.%$fuzzyBase%,course_code.ilike.%${alt.split('').join('%')}%'
-          : 'course_code.ilike.%$fuzzyBase%';
-      final data = await _supabase.from('courses_$sem').select().or(orClause);
+          ? 'course_code.ilike.%$base%,course_code.ilike.%$alt%'
+          : 'course_code.ilike.%$base%';
+      final data = await _supabase
+          .from('courses_$sem')
+          .select('id, course_code, course_name, section_number, faculty_initials, faculty_name, schedule_data, capacity, credit_val, department')
+          .or(orClause)
+          .limit(50);
       return (data as List).map((e) => _mapToCourseSection(Map<String, dynamic>.from(e))).toList();
     } catch (e) {
       return [];

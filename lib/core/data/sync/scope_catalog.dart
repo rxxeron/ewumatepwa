@@ -68,7 +68,7 @@ class ScopeCatalog {
     ScopeTable('scholarship_policies', style: PullStyle.full),
     ScopeTable('tutorials', style: PullStyle.full),
     ScopeTable('app_config', pk: ['key'], style: PullStyle.full),
-    ScopeTable('course_metadata', pk: ['code'], style: PullStyle.full),
+    ScopeTable('course_metadata', pk: ['code']),
   ];
 
   static const facultyTables = <ScopeTable>[
