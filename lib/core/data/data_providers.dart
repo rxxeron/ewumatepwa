@@ -89,6 +89,7 @@ class SyncCoordinator {
   AppLifecycleListener? _lifecycle;
   RealtimeChannel? _channel;
   Timer? _debounce;
+  DateTime? _lastAutoScheduleAt;
   bool _pendingForce = false;
   bool _disposed = false;
 
@@ -96,7 +97,7 @@ class SyncCoordinator {
 
   void start() {
     _subs.add(SyncSignals.instance.stream.listen((r) => schedule(force: r.force)));
-    _lifecycle = AppLifecycleListener(onResume: schedule);
+    _lifecycle = AppLifecycleListener(onResume: _onResume);
     _ref.listen<AsyncValue<bool>>(connectivityProvider, (prev, next) {
       if (prev?.value == false && next.value == true) schedule();
     });
@@ -114,6 +115,16 @@ class SyncCoordinator {
     });
   }
 
+  /// Avoid hammering sync_check() when the user quickly switches tabs/apps back and forth.
+  void _onResume() {
+    final now = DateTime.now();
+    if (_lastAutoScheduleAt != null && now.difference(_lastAutoScheduleAt!) < const Duration(seconds: 60)) {
+      return;
+    }
+    _lastAutoScheduleAt = now;
+    schedule();
+  }
+
   /// Debounced: bursts of triggers (Realtime fan-out, typing) become one sync.
   void schedule({bool force = false, Duration delay = const Duration(milliseconds: 600)}) {
     if (_disposed) return;
@@ -122,6 +133,7 @@ class SyncCoordinator {
     _debounce = Timer(delay, () {
       final f = _pendingForce;
       _pendingForce = false;
+      _lastAutoScheduleAt = DateTime.now();
       unawaited(_engine.sync(force: f));
     });
   }
@@ -129,13 +141,26 @@ class SyncCoordinator {
   Future<SyncReport> syncNow({bool force = false}) => _engine.sync(force: force);
 
   void _subscribeRealtime() {
+    final myUid = _engine.userId;
+    final myUserScope = 'user:$myUid';
+    final myNotifsScope = 'notifs:$myUid';
     _channel = _client
         .channel('sync-versions')
         .onPostgresChanges(
           event: PostgresChangeEvent.all,
           schema: 'sync',
           table: 'versions',
-          callback: (_) => schedule(delay: const Duration(seconds: 2)),
+          callback: (payload) {
+            // Ignore other users' private scope bumps so we don't fan-out sync_check() to every device.
+            final scope = (payload.newRecord['scope'] ?? payload.oldRecord['scope'])?.toString();
+            if (scope != null &&
+                (scope.startsWith('user:') || scope.startsWith('notifs:')) &&
+                scope != myUserScope &&
+                scope != myNotifsScope) {
+              return;
+            }
+            schedule(delay: const Duration(seconds: 2));
+          },
         )
         .subscribe();
   }

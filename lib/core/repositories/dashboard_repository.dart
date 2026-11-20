@@ -13,8 +13,16 @@ part 'dashboard_repository.g.dart';
 class DashboardRepository {
   final SupabaseClient _supabase;
   final CacheService _cache;
+  static const _bgRefetchCooldown = Duration(minutes: 5);
+  final Map<String, DateTime> _lastFetched = {};
 
   DashboardRepository(this._supabase, this._cache);
+
+  bool _shouldBackgroundRefetch(String key) {
+    final last = _lastFetched[key];
+    if (last == null) return true;
+    return DateTime.now().difference(last) >= _bgRefetchCooldown;
+  }
 
   Future<SemesterAnalytics?> getAnalytics(
     String userId,
@@ -23,9 +31,14 @@ class DashboardRepository {
     final safeSem = CourseUtils.cleanSemester(semesterCode);
     final cached = _cache.getCachedDashboardAnalytics(userId, safeSem);
     if (cached != null) {
-      _fetchAndCacheAnalytics(userId, safeSem);
+      final key = 'analytics:$userId:$safeSem';
+      if (_shouldBackgroundRefetch(key)) {
+        _lastFetched[key] = DateTime.now();
+        _fetchAndCacheAnalytics(userId, safeSem).catchError((_) => null);
+      }
       return SemesterAnalytics.fromJson(cached);
     }
+    _lastFetched['analytics:$userId:$safeSem'] = DateTime.now();
     return await _fetchAndCacheAnalytics(userId, safeSem);
   }
 
@@ -57,9 +70,14 @@ class DashboardRepository {
     final safeSem = CourseUtils.cleanSemester(semesterCode);
     final cached = _cache.getCachedDashboardSchedule(userId, safeSem);
     if (cached != null) {
-      _fetchAndCacheState(userId, safeSem);
+      final key = 'state:$userId:$safeSem';
+      if (_shouldBackgroundRefetch(key)) {
+        _lastFetched[key] = DateTime.now();
+        _fetchAndCacheState(userId, safeSem).catchError((_) => null);
+      }
       return UserSemesterState.fromJson(cached);
     }
+    _lastFetched['state:$userId:$safeSem'] = DateTime.now();
     return await _fetchAndCacheState(userId, safeSem);
   }
 
