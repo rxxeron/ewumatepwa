@@ -221,7 +221,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget build(BuildContext context) {
     final user = _controller.user;
     if (user == null) {
-      return const Center(child: Text("Please log in"));
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Session expired. Please log in again.',
+              style: GoogleFonts.sora(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => context.go('/login'),
+              child: const Text('Log in'),
+            ),
+          ],
+        ),
+      );
     }
 
     final state = _controller.state;

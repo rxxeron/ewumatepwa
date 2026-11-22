@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/data_providers.dart';
+
 import '../../features/auth/check_auth_screen.dart';
 import '../../features/auth/login_screen.dart';
 import '../../features/auth/register_screen.dart';
@@ -43,10 +45,28 @@ import '../services/pwa_service.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
 
+const _publicAuthRoutes = {
+  '/ios-only',
+  '/',
+  '/login',
+  '/login-callback',
+  '/register',
+  '/forgot-password',
+};
+
+class _AuthRefreshListenable extends ChangeNotifier {
+  void notify() => notifyListeners();
+}
+
 final appRouterProvider = Provider<GoRouter>((ref) {
-  return GoRouter(
+  final refreshListenable = _AuthRefreshListenable();
+  ref.listen<String?>(currentUserIdProvider, (_, __) => refreshListenable.notify());
+  ref.onDispose(refreshListenable.dispose);
+
+  final router = GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/',
+    refreshListenable: refreshListenable,
     redirect: (context, state) {
       final pwaState = ref.read(pwaControllerProvider);
       final hasRxxeronQuery = state.uri.queryParameters['rxxeron'] == 'true' ||
@@ -65,6 +85,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
 
       if (allowed && isGateRoute) {
         return '/';
+      }
+
+      final uid = ref.read(currentUserIdProvider);
+      if (uid == null && !_publicAuthRoutes.contains(state.matchedLocation)) {
+        return '/login';
       }
 
       return null;
@@ -165,5 +190,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(name: 'Tutorials', path: '/tutorials', builder: (context, state) => const TutorialsScreen()),
     ],
   );
+  ref.onDispose(router.dispose);
+  return router;
 });
 

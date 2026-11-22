@@ -37,6 +37,33 @@ String normSemester(String? s) {
   return yearFirst == null ? c : '${yearFirst.group(2)}${yearFirst.group(1)}';
 }
 
+/// Monotonic chronological key for a semester ("spring2026" -> 20261,
+/// "summer2026" -> 20262, "fall2026" -> 20263), or null if unparseable.
+int? semesterOrder(String? s) {
+  final m = RegExp(r'^(spring|summer|fall)(\d{4})$').firstMatch(normSemester(s));
+  if (m == null) return null;
+  final term = switch (m.group(1)) {
+    'spring' => 1,
+    'summer' => 2,
+    'fall' => 3,
+    _ => 0,
+  };
+  return int.parse(m.group(2)!) * 10 + term;
+}
+
+/// True when [semester] is strictly before [activeSemester] (excludes the
+/// current semester and any future/pre-advised semester such as [nextSemester]).
+bool isPastSemester(String? semester, String? activeSemester, {String? nextSemester}) {
+  final sem = normSemester(semester);
+  final active = normSemester(activeSemester);
+  if (sem.isEmpty || active.isEmpty || sem == active) return false;
+  if (nextSemester != null && sem == normSemester(nextSemester)) return false;
+  final semOrd = semesterOrder(sem);
+  final activeOrd = semesterOrder(active);
+  if (semOrd != null && activeOrd != null) return semOrd < activeOrd;
+  return true;
+}
+
 class ScopeCatalog {
   ScopeCatalog._();
 

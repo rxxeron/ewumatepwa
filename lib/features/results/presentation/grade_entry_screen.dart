@@ -12,6 +12,7 @@ import '../../../core/utils/grade_helper.dart';
 import '../../semester_progress/semester_summary_providers.dart';
 import '../../../core/models/grade_scale.dart';
 import '../../../core/utils/error_utils.dart';
+import '../../../core/data/sync/scope_catalog.dart';
 import '../../auth/auth_providers.dart';
 import '../../../core/providers/supabase_provider.dart';
 
@@ -37,11 +38,12 @@ final pendingGradesProvider = FutureProvider<List<Map<String, dynamic>>>((
     final client = ref.read(supabaseClientProvider);
     final activeSemRes = await client
         .from('active_semester')
-        .select('current_semester_code, grade_submission_start')
+        .select('current_semester_code, next_semester_code, grade_submission_start')
         .eq('track', track)
         .maybeSingle();
 
-    final activeCode = activeSemRes?['current_semester_code'];
+    final activeCode = activeSemRes?['current_semester_code'] as String?;
+    final nextCode = activeSemRes?['next_semester_code'] as String?;
     final submissionStartStr = activeSemRes?['grade_submission_start'];
 
     bool isPhase2Active = false;
@@ -65,11 +67,13 @@ final pendingGradesProvider = FutureProvider<List<Map<String, dynamic>>>((
     // 3. Filter: Only show those that are actually blocking
     // - Past courses (Phase 1)
     // - Current courses if submission window is open (Phase 2)
+    // - Never future / pre-advised semesters (e.g. next_semester_code)
     final filteredData = allData.where((enrollment) {
-      final semCode = enrollment['semester_code'];
+      final semCode = enrollment['semester_code'] as String?;
       if (activeCode == null) return true; // Fallback if no active sem config
-      if (semCode != activeCode) return true; // Past hanging course
-      return isPhase2Active; // Current course only if deadline passed
+      if (isPastSemester(semCode, activeCode, nextSemester: nextCode)) return true; // Past hanging course
+      if (normSemester(semCode) == normSemester(activeCode)) return isPhase2Active; // Current course only if deadline passed
+      return false;
     }).toList();
 
     cache.setMapData('dashboard_box', cacheKey, {'data': filteredData});

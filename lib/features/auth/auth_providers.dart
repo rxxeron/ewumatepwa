@@ -74,9 +74,12 @@ bool computeRequiresGradeEntry({
   final active = activeSemesters.where((r) => r['track'] == track).firstOrNull;
   if (active == null) return false;
   final activeCode = normSemester(active['current_semester_code'] as String?);
+  final nextCode = active['next_semester_code'] as String?;
 
   final unsubmitted = enrollments.where((e) => e['status'] == 'enrolled' && e['grade'] == null).toList();
-  if (unsubmitted.any((e) => normSemester(e['semester_code'] as String?) != activeCode)) return true;
+  if (unsubmitted.any((e) => isPastSemester(e['semester_code'] as String?, activeCode, nextSemester: nextCode))) {
+    return true;
+  }
 
   final start = DateTime.tryParse('${active['grade_submission_start']}');
   if (start != null && now.isAfter(start.add(const Duration(days: 1)))) {
