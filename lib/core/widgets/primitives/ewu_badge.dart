@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../theme/ewu_theme_extension.dart';
+import '../../theme/ewu_tokens.dart';
 
 enum EwuBadgeVariant { filled, outline, subtle }
 typedef EwuBadgeType = EwuBadgeVariant;
@@ -21,31 +21,29 @@ class EwuBadge extends StatelessWidget {
     this.icon,
     EwuBadgeVariant? variant,
     EwuBadgeVariant? type,
-    this.fontSize = 11.0,
-    this.padding = const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+    this.fontSize = 12.0,
+    this.padding = const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
   }) : variant = type ?? variant ?? EwuBadgeVariant.subtle;
 
-  factory EwuBadge.room(String room, {double fontSize = 11.0}) {
+  factory EwuBadge.room(String room, {double fontSize = 12.0}) {
     return EwuBadge(
       label: room,
       icon: Icons.meeting_room_outlined,
-      color: const Color(0xFF19D9F5),
       variant: EwuBadgeVariant.subtle,
       fontSize: fontSize,
     );
   }
 
-  factory EwuBadge.section(String section, {double fontSize = 11.0}) {
+  factory EwuBadge.section(String section, {double fontSize = 12.0}) {
     return EwuBadge(
       label: section,
       icon: Icons.group_work_outlined,
-      color: const Color(0xFF5EA8FF),
       variant: EwuBadgeVariant.subtle,
       fontSize: fontSize,
     );
   }
 
-  factory EwuBadge.status(String status, {required Color color, double fontSize = 11.0}) {
+  factory EwuBadge.status(String status, {required Color color, double fontSize = 12.0}) {
     return EwuBadge(
       label: status,
       color: color,
@@ -57,35 +55,32 @@ class EwuBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.ewuColors;
-    final baseColor = color ?? colors.primaryCyan;
+    final baseColor = color ?? colors.accent;
 
-    Color bg;
-    Color fg;
-    Color border;
+    final Color bg;
+    final Color fg;
+    final Color border;
 
     switch (variant) {
       case EwuBadgeVariant.filled:
         bg = baseColor;
-        fg = colors.isDark ? colors.primaryNavy : Colors.white;
+        fg = colors.isDark ? colors.bg : colors.surface;
         border = Colors.transparent;
-        break;
       case EwuBadgeVariant.outline:
         bg = Colors.transparent;
         fg = baseColor;
-        border = baseColor.withValues(alpha: 0.4);
-        break;
+        border = baseColor.withValues(alpha: 0.35);
       case EwuBadgeVariant.subtle:
-        bg = baseColor.withValues(alpha: colors.isDark ? 0.16 : 0.12);
+        bg = baseColor.withValues(alpha: colors.isDark ? 0.14 : 0.10);
         fg = baseColor;
-        border = baseColor.withValues(alpha: colors.isDark ? 0.28 : 0.24);
-        break;
+        border = baseColor.withValues(alpha: colors.isDark ? 0.26 : 0.22);
     }
 
     return Container(
       padding: padding,
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(EwuRadius.chip),
         border: Border.all(color: border, width: 1),
       ),
       child: Row(
@@ -94,15 +89,12 @@ class EwuBadge extends StatelessWidget {
         children: [
           if (icon != null) ...[
             Icon(icon, size: fontSize + 1, color: fg),
-            const SizedBox(width: 4),
+            const SizedBox(width: EwuSpace.xxs),
           ],
           Text(
             label,
-            style: GoogleFonts.sora(
-              color: fg,
-              fontSize: fontSize,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.2,
+            style: EwuText.caption(fg, weight: FontWeight.w600).copyWith(
+              fontSize: fontSize < 12.0 ? 12.0 : fontSize,
             ),
           ),
         ],

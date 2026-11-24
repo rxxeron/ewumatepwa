@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+/// Snappy, reduced-motion-aware entrance transition (fade + subtle slide).
 class FadeInSlide extends StatefulWidget {
   final Widget child;
   final Duration duration;
@@ -9,7 +10,7 @@ class FadeInSlide extends StatefulWidget {
   const FadeInSlide({
     super.key,
     required this.child,
-    this.duration = const Duration(milliseconds: 600),
+    this.duration = const Duration(milliseconds: 340),
     this.delay = Duration.zero,
     this.direction = 1,
   });
@@ -20,9 +21,9 @@ class FadeInSlide extends StatefulWidget {
 
 class _FadeInSlideState extends State<FadeInSlide>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<Offset> _offsetAnimation;
-  late Animation<double> _fadeAnimation;
+  late final AnimationController _controller;
+  late final Animation<Offset> _offsetAnimation;
+  late final Animation<double> _fadeAnimation;
 
   @override
   void initState() {
@@ -33,7 +34,7 @@ class _FadeInSlideState extends State<FadeInSlide>
     );
 
     _offsetAnimation = Tween<Offset>(
-      begin: Offset(0, 0.2 * widget.direction),
+      begin: Offset(0, 0.06 * widget.direction),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _controller,
@@ -48,11 +49,13 @@ class _FadeInSlideState extends State<FadeInSlide>
       curve: Curves.easeOut,
     ));
 
-    Future.delayed(widget.delay, () {
-      if (mounted) {
-        _controller.forward();
-      }
-    });
+    if (widget.delay == Duration.zero) {
+      _controller.forward();
+    } else {
+      Future.delayed(widget.delay, () {
+        if (mounted) _controller.forward();
+      });
+    }
   }
 
   @override
@@ -63,6 +66,9 @@ class _FadeInSlideState extends State<FadeInSlide>
 
   @override
   Widget build(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      return widget.child;
+    }
     return FadeTransition(
       opacity: _fadeAnimation,
       child: SlideTransition(

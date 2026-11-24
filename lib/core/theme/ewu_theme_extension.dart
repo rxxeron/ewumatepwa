@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'app_colors.dart';
+import 'ewu_tokens.dart';
 
 @immutable
 class EwuColors extends ThemeExtension<EwuColors> {
@@ -20,12 +21,42 @@ class EwuColors extends ThemeExtension<EwuColors> {
   final Color info;
   final bool isDark;
 
+  // Role-based semantic aliases (preferred for new/migrated code)
+  Color get bg => primaryNavy;
+  Color get surface => surfaceNavyBlue;
+  Color get surfaceRaised => surfaceElevated;
+  Color get accent => primaryCyan;
+  Color get accentSecondary => secondarySoftBlue;
   Color get textPrimary => primaryText;
   Color get textSecondary => secondaryText;
   Color get textTertiary => tertiaryText;
+  Color get textMuted => tertiaryText;
   Color get accentAlert => error;
   Color get accentAmber => warning;
   Color get surfaceCardNavy => surfaceElevated;
+
+  EwuTone get accentTone => _tone(primaryCyan);
+  EwuTone get successTone => _tone(success);
+  EwuTone get warningTone => _tone(warning);
+  EwuTone get dangerTone => _tone(error);
+  EwuTone get infoTone => _tone(info);
+  EwuTone get academicTone => _tone(academic);
+
+  /// Six fixed contrast-checked category colors for courses & task types.
+  List<Color> get categoryColors => [
+        primaryCyan,
+        secondarySoftBlue,
+        success,
+        warning,
+        academic,
+        info,
+      ];
+
+  EwuTone _tone(Color base) => EwuTone(
+        fg: base,
+        bg: base.withValues(alpha: isDark ? 0.14 : 0.10),
+        border: base.withValues(alpha: isDark ? 0.28 : 0.24),
+      );
 
   const EwuColors({
     required this.primaryNavy,
@@ -47,16 +78,16 @@ class EwuColors extends ThemeExtension<EwuColors> {
   });
 
   static const dark = EwuColors(
-    primaryNavy: AppColors.primaryNavy, // #071426
-    surfaceNavyBlue: AppColors.surfaceNavyBlue, // #0D2342
-    surfaceElevated: Color(0xFF132F56),
-    primaryCyan: AppColors.primaryCyan, // #19D9F5
-    secondarySoftBlue: AppColors.secondarySoftBlue, // #5EA8FF
-    borderSubtle: Color(0x1FFFFFFF), // white 12%
+    primaryNavy: AppColors.primaryNavy, // #090C14 Obsidian
+    surfaceNavyBlue: AppColors.surfaceNavyBlue, // #101521
+    surfaceElevated: AppColors.surfaceElevated, // #171E2E
+    primaryCyan: AppColors.primaryCyan, // #22D3EE
+    secondarySoftBlue: AppColors.secondarySoftBlue, // #818CF8
+    borderSubtle: Color(0x14FFFFFF), // white 8% hairline
     borderFocus: AppColors.primaryCyan,
-    primaryText: AppColors.primaryText, // white
-    secondaryText: AppColors.secondaryText, // #8493A8
-    tertiaryText: Color(0xFF64748B),
+    primaryText: AppColors.primaryText, // #F8FAFC
+    secondaryText: AppColors.secondaryText, // #94A3B8
+    tertiaryText: AppColors.mutedText, // #64748B
     success: AppColors.success,
     warning: AppColors.warning,
     error: AppColors.error,
@@ -66,17 +97,17 @@ class EwuColors extends ThemeExtension<EwuColors> {
   );
 
   static const light = EwuColors(
-    primaryNavy: Color(0xFFF8FAFC), // Crisp Slate Background
-    surfaceNavyBlue: Colors.white, // Crisp White Cards
-    surfaceElevated: Color(0xFFF1F5F9), // Soft Muted Gray Elevation
-    primaryCyan: Color(0xFF0284C7), // High-contrast Ocean Cyan/Blue
-    secondarySoftBlue: Color(0xFF2563EB), // Royal Blue
-    borderSubtle: Color(0x140F172A), // Subtle Slate Border 8%
-    borderFocus: Color(0xFF0284C7),
-    primaryText: Color(0xFF0F172A), // Dark Slate
-    secondaryText: Color(0xFF64748B), // Slate Gray
-    tertiaryText: Color(0xFF94A3B8), // Muted Gray
-    success: Color(0xFF16A34A),
+    primaryNavy: Color(0xFFF6F8FC), // Cool Alabaster
+    surfaceNavyBlue: Color(0xFFFFFFFF), // Pure White Bento Card
+    surfaceElevated: Color(0xFFEEF2F8), // Soft Slate Surface
+    primaryCyan: Color(0xFF0891B2), // High-contrast Deep Cyan
+    secondarySoftBlue: Color(0xFF4F46E5), // Crisp Indigo
+    borderSubtle: Color(0x120F172A), // Slate 7% hairline
+    borderFocus: Color(0xFF0891B2),
+    primaryText: Color(0xFF0F172A), // Slate 900
+    secondaryText: Color(0xFF475569), // Slate 600
+    tertiaryText: Color(0xFF64748B), // Slate 500
+    success: Color(0xFF059669),
     warning: Color(0xFFD97706),
     error: Color(0xFFDC2626),
     academic: Color(0xFF7C3AED),

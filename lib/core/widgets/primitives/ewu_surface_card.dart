@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/ewu_theme_extension.dart';
+import '../../theme/ewu_tokens.dart';
 
-/// A modern, tactile card component implementing the Double-Bezel architecture
-/// with smooth spring-scale press physics and semantic theme awareness.
+/// A modern, tactile bento card component with crisp 1px border depth,
+/// smooth spring-scale press physics, and semantic theme awareness.
 class EwuSurfaceCard extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
@@ -21,9 +22,9 @@ class EwuSurfaceCard extends StatefulWidget {
     super.key,
     required this.child,
     this.onTap,
-    this.padding = const EdgeInsets.all(16),
+    this.padding = const EdgeInsets.all(EwuSpace.md),
     this.margin,
-    this.borderRadius = 20.0,
+    this.borderRadius = EwuRadius.card,
     this.backgroundColor,
     this.borderColor,
     this.borderWidth = 1.0,
@@ -75,17 +76,11 @@ class _EwuSurfaceCardState extends State<EwuSurfaceCard> {
                 BoxShadow(
                   color: widget.glowColor!.withValues(alpha: widget.glowAlpha),
                   blurRadius: widget.glowBlur,
-                  spreadRadius: 1,
+                  spreadRadius: 0,
                   offset: const Offset(0, 4),
                 ),
               ]
-            : [
-                BoxShadow(
-                  color: colors.isDark ? Colors.black.withValues(alpha: 0.25) : Colors.black.withValues(alpha: 0.04),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+            : null,
       ),
       child: widget.child,
     );

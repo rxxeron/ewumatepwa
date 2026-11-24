@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:glass_kit/glass_kit.dart';
+import 'glass_kit.dart';
 import '../services/tutorial_service.dart';
+import '../theme/ewu_theme_extension.dart';
+import '../theme/ewu_tokens.dart';
 
 class OnboardingOverlay extends StatelessWidget {
   final String featureKey;
@@ -68,55 +70,50 @@ class _OnboardingDialogBodyState extends State<_OnboardingDialogBody> {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24),
-        child: GlassContainer(
-          height: 440,
-          width: double.infinity,
-          borderRadius: BorderRadius.circular(32),
-          borderWidth: 1.5,
-          color: Colors.white.withValues(alpha: 0.05),
-          borderColor: Colors.white.withValues(alpha: 0.2),
-          blur: 15,
-          child: Column(
-            children: [
-              Expanded(
-                child: PageView.builder(
-                  controller: _pageController,
-                  onPageChanged: (idx) => setState(() => _currentStep = idx),
-                  itemCount: widget.steps.length,
-                  itemBuilder: (context, index) {
-                    final step = widget.steps[index];
-                    return Padding(
-                      padding: const EdgeInsets.all(32.0),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(step.icon, size: 64, color: Colors.cyanAccent),
-                          const SizedBox(height: 24),
-                          Text(
-                            step.title,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
+    final colors = context.ewuColors;
+    return Material(
+      type: MaterialType.transparency,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: GlassContainer(
+            height: 440,
+            width: double.infinity,
+            borderRadius: 24,
+            color: colors.surface,
+            opacity: 0.94,
+            borderColor: colors.borderSubtle,
+            blur: 15,
+            child: Column(
+              children: [
+                Expanded(
+                  child: PageView.builder(
+                    controller: _pageController,
+                    onPageChanged: (idx) => setState(() => _currentStep = idx),
+                    itemCount: widget.steps.length,
+                    itemBuilder: (context, index) {
+                      final step = widget.steps[index];
+                      return Padding(
+                        padding: const EdgeInsets.all(32.0),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(step.icon, size: 56, color: colors.accent),
+                            const SizedBox(height: 24),
+                            Text(
+                              step.title,
+                              textAlign: TextAlign.center,
+                              style: EwuText.title(colors.textPrimary),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            step.description,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 14,
-                              height: 1.5,
+                            const SizedBox(height: 12),
+                            Text(
+                              step.description,
+                              textAlign: TextAlign.center,
+                              style: EwuText.body(colors.textSecondary),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
+                          ],
+                        ),
+                      );
                   },
                 ),
               ),
@@ -139,8 +136,8 @@ class _OnboardingDialogBodyState extends State<_OnboardingDialogBody> {
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _currentStep == index
-                                    ? Colors.cyanAccent
-                                    : Colors.white24,
+                                    ? context.ewuColors.accent
+                                    : context.ewuColors.borderSubtle,
                               ),
                             ),
                           ),
@@ -160,7 +157,7 @@ class _OnboardingDialogBodyState extends State<_OnboardingDialogBody> {
                             }
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.cyanAccent,
+                            backgroundColor: context.ewuColors.accent,
                             foregroundColor: Colors.black,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
@@ -183,10 +180,10 @@ class _OnboardingDialogBodyState extends State<_OnboardingDialogBody> {
                           if (context.mounted) Navigator.pop(context);
                           widget.onComplete?.call();
                         },
-                        child: const Text(
+                        child: Text(
                           'Skip',
                           style: TextStyle(
-                            color: Colors.white38,
+                            color: context.ewuColors.textMuted,
                             fontSize: 12,
                             fontWeight: FontWeight.w500,
                           ),
@@ -199,6 +196,7 @@ class _OnboardingDialogBodyState extends State<_OnboardingDialogBody> {
             ],
           ),
         ),
+      ),
       ),
     );
   }

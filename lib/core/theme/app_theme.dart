@@ -1,181 +1,92 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'app_colors.dart';
-
 import 'ewu_theme_extension.dart';
+import 'ewu_tokens.dart';
 
 class AppTheme {
-  // Brand Colors (Figma Design Tokens)
-  static const Color slate900 = AppColors.primaryNavy; // #071426 App Scaffold Background
-  static const Color slate800 = AppColors.surfaceNavyBlue; // #0D2342 Containers & Cards
-  static const Color slate400 = AppColors.secondaryText; // #8493A8 Secondary Text/Subtitles
-  static const Color cyanAccent = AppColors.primaryCyan; // #19D9F5 Primary Brand Action
-  static const Color cyanDark = Color(0xFF0891B2); // Secondary Cyan
+  static ThemeData get darkTheme => _buildTheme(EwuColors.dark);
+  static ThemeData get lightTheme => _buildTheme(EwuColors.light);
 
-  static ThemeData get darkTheme {
-    final baseDark = ThemeData.dark();
-    return baseDark.copyWith(
-      scaffoldBackgroundColor: AppColors.primaryNavy,
-      extensions: const [EwuColors.dark],
-      
-      // Google Fonts Sora typography applied globally
-      textTheme: GoogleFonts.soraTextTheme(baseDark.textTheme),
-      
-      // Align Color Scheme with Figma Navy & Cyan Brand Identity
-      colorScheme: const ColorScheme.dark(
-        primary: AppColors.primaryCyan,
-        secondary: AppColors.secondarySoftBlue,
-        surface: AppColors.surfaceNavyBlue,
-        onSurface: Colors.white,
-        onSurfaceVariant: AppColors.secondaryText,
-      ),
-
-      // Global AppBar Configuration
-      appBarTheme: AppBarTheme(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Colors.white),
-        titleTextStyle: GoogleFonts.sora(
-          color: Colors.white,
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.5,
-        ),
-      ),
-
-      // Global Card Configuration
-      cardTheme: CardThemeData(
-        color: AppColors.surfaceNavyBlue.withValues(alpha: 0.7),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        elevation: 0,
-      ),
-
-      // Global Chip Configuration
-      chipTheme: ChipThemeData(
-        backgroundColor: AppColors.primaryNavy,
-        selectedColor: AppColors.primaryCyan,
-        disabledColor: Colors.transparent,
-        labelStyle: GoogleFonts.sora(color: Colors.white, fontWeight: FontWeight.bold),
-        secondaryLabelStyle: GoogleFonts.sora(color: AppColors.primaryNavy, fontWeight: FontWeight.bold),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        side: const BorderSide(color: Colors.white24, width: 1),
-      ),
-
-      // Global Bottom Sheet Configuration
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: AppColors.surfaceNavyBlue,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-      ),
-
-      // Global InputDecoration Configuration for text fields
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: AppColors.surfaceNavyBlue.withValues(alpha: 0.6),
-        hintStyle: GoogleFonts.sora(color: AppColors.secondaryText, fontSize: 14),
-        prefixIconColor: AppColors.secondaryText,
-        contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: AppColors.primaryCyan, width: 1.5),
-        ),
-      ),
-
-      // Global Text Selection Cursor colors
-      textSelectionTheme: const TextSelectionThemeData(
-        cursorColor: AppColors.primaryCyan,
-        selectionColor: Color(0xFF0284C7),
-        selectionHandleColor: AppColors.primaryCyan,
-      ),
+  static ThemeData _buildTheme(EwuColors c) {
+    final base = c.isDark ? ThemeData.dark() : ThemeData.light();
+    final interBase = GoogleFonts.interTextTheme(base.textTheme).apply(
+      bodyColor: c.textPrimary,
+      displayColor: c.textPrimary,
     );
-  }
 
-  static ThemeData get lightTheme {
-    final baseLight = ThemeData.light();
-    return baseLight.copyWith(
-      scaffoldBackgroundColor: const Color(0xFFF8FAFC),
-      extensions: const [EwuColors.light],
-      
-      textTheme: GoogleFonts.soraTextTheme(baseLight.textTheme),
-      
-      colorScheme: const ColorScheme.light(
-        primary: Color(0xFF0284C7),
-        secondary: Color(0xFF2563EB),
-        surface: Colors.white,
-        onSurface: Color(0xFF0F172A),
-        onSurfaceVariant: Color(0xFF64748B),
+    return base.copyWith(
+      scaffoldBackgroundColor: c.bg,
+      extensions: [c],
+      textTheme: interBase.copyWith(
+        displaySmall: EwuText.display(c.textPrimary),
+        headlineMedium: EwuText.title(c.textPrimary),
+        titleMedium: EwuText.headline(c.textPrimary),
+        bodyMedium: EwuText.body(c.textPrimary),
+        labelLarge: EwuText.label(c.textPrimary),
+        bodySmall: EwuText.caption(c.textSecondary),
       ),
-
+      colorScheme: (c.isDark ? const ColorScheme.dark() : const ColorScheme.light()).copyWith(
+        primary: c.accent,
+        secondary: c.accentSecondary,
+        surface: c.surface,
+        onSurface: c.textPrimary,
+        onSurfaceVariant: c.textSecondary,
+        error: c.error,
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        centerTitle: true,
-        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
-        titleTextStyle: GoogleFonts.sora(
-          color: const Color(0xFF0F172A),
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.5,
-        ),
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        iconTheme: IconThemeData(color: c.textPrimary),
+        titleTextStyle: EwuText.title(c.textPrimary),
       ),
-
       cardTheme: CardThemeData(
-        color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        color: c.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(EwuRadius.card),
+          side: BorderSide(color: c.borderSubtle, width: 1),
+        ),
         elevation: 0,
       ),
-
       chipTheme: ChipThemeData(
-        backgroundColor: const Color(0xFFF1F5F9),
-        selectedColor: const Color(0xFF0284C7),
+        backgroundColor: c.surfaceRaised,
+        selectedColor: c.accent,
         disabledColor: Colors.transparent,
-        labelStyle: GoogleFonts.sora(color: const Color(0xFF0F172A), fontWeight: FontWeight.bold),
-        secondaryLabelStyle: GoogleFonts.sora(color: Colors.white, fontWeight: FontWeight.bold),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        side: const BorderSide(color: Color(0x140F172A), width: 1),
+        labelStyle: EwuText.label(c.textPrimary),
+        secondaryLabelStyle: EwuText.label(c.isDark ? c.bg : Colors.white),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(EwuRadius.chip)),
+        side: BorderSide(color: c.borderSubtle, width: 1),
       ),
-
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: c.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(EwuRadius.sheet)),
         ),
       ),
-
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFF1F5F9),
-        hintStyle: GoogleFonts.sora(color: const Color(0xFF64748B), fontSize: 14),
-        prefixIconColor: const Color(0xFF64748B),
+        fillColor: c.surfaceRaised,
+        hintStyle: EwuText.body(c.textMuted),
+        prefixIconColor: c.textSecondary,
         contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(EwuRadius.card),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0x140F172A)),
+          borderRadius: BorderRadius.circular(EwuRadius.card),
+          borderSide: BorderSide(color: c.borderSubtle),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: Color(0xFF0284C7), width: 1.5),
+          borderRadius: BorderRadius.circular(EwuRadius.card),
+          borderSide: BorderSide(color: c.accent, width: 1.5),
         ),
       ),
-
-      textSelectionTheme: const TextSelectionThemeData(
-        cursorColor: Color(0xFF0284C7),
-        selectionColor: Color(0x330284C7),
-        selectionHandleColor: Color(0xFF0284C7),
+      textSelectionTheme: TextSelectionThemeData(
+        cursorColor: c.accent,
+        selectionColor: c.accent.withValues(alpha: 0.25),
+        selectionHandleColor: c.accent,
       ),
     );
   }

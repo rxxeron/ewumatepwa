@@ -1,8 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../../theme/ewu_theme_extension.dart';
+import '../../theme/ewu_tokens.dart';
 
 class EwuNavItem {
   final IconData icon;
@@ -16,8 +16,8 @@ class EwuNavItem {
   });
 }
 
-/// A modern, detached floating glass navigation bar with smooth animated
-/// active indicators and tactile feedback.
+/// Detached floating glass navigation pill with stable 5-slot layout and
+/// always-visible labels for effortless scanning.
 class EwuFloatingNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onItemSelected;
@@ -37,55 +37,41 @@ class EwuFloatingNavBar extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        padding: const EdgeInsets.fromLTRB(EwuSpace.md, 0, EwuSpace.md, EwuSpace.sm),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(32),
+          borderRadius: BorderRadius.circular(EwuRadius.sheet + 4),
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
-              height: 66,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              height: 64,
+              padding: const EdgeInsets.symmetric(horizontal: EwuSpace.xs, vertical: 6),
               decoration: BoxDecoration(
-                color: colors.surfaceNavyBlue.withValues(alpha: colors.isDark ? 0.86 : 0.94),
-                borderRadius: BorderRadius.circular(34),
-                border: Border.all(
-                  color: colors.isDark
-                      ? Colors.white.withValues(alpha: 0.10)
-                      : colors.borderSubtle,
-                  width: 1.2,
-                ),
+                color: colors.surface.withValues(alpha: colors.isDark ? 0.90 : 0.95),
+                borderRadius: BorderRadius.circular(EwuRadius.sheet + 4),
+                border: Border.all(color: colors.borderSubtle, width: 1),
                 boxShadow: [
-                  // Deep shadow for floating detachment
                   BoxShadow(
-                    color: colors.isDark
-                        ? Colors.black.withValues(alpha: 0.65)
-                        : const Color(0xFF0F172A).withValues(alpha: 0.12),
-                    blurRadius: 32,
-                    offset: const Offset(0, 12),
+                    color: Colors.black.withValues(alpha: colors.isDark ? 0.45 : 0.08),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
                   ),
-                  // Ambient cyan flow underglow
-                  if (colors.isDark)
-                    BoxShadow(
-                      color: colors.primaryCyan.withValues(alpha: 0.14),
-                      blurRadius: 24,
-                      offset: const Offset(0, 4),
-                    ),
                 ],
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: List.generate(items.length, (index) {
                   final item = items[index];
                   final isSelected = index == currentIndex;
-                  return _NavBarItemWidget(
-                    item: item,
-                    isSelected: isSelected,
-                    onTap: () {
-                      if (!isSelected) {
-                        HapticFeedback.selectionClick();
-                        onItemSelected(index);
-                      }
-                    },
+                  return Expanded(
+                    child: _NavBarItemWidget(
+                      item: item,
+                      isSelected: isSelected,
+                      onTap: () {
+                        if (!isSelected) {
+                          HapticFeedback.selectionClick();
+                          onItemSelected(index);
+                        }
+                      },
+                    ),
                   );
                 }),
               ),
@@ -118,6 +104,7 @@ class _NavBarItemWidgetState extends State<_NavBarItemWidget> {
   @override
   Widget build(BuildContext context) {
     final colors = context.ewuColors;
+    final fg = widget.isSelected ? colors.accent : colors.textSecondary;
 
     return GestureDetector(
       onTapDown: (_) => setState(() => _isPressed = true),
@@ -126,54 +113,37 @@ class _NavBarItemWidgetState extends State<_NavBarItemWidget> {
       onTap: widget.onTap,
       behavior: HitTestBehavior.opaque,
       child: AnimatedScale(
-        scale: _isPressed ? 0.90 : 1.0,
+        scale: _isPressed ? 0.92 : 1.0,
         duration: const Duration(milliseconds: 120),
         curve: Curves.easeOutCubic,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 260),
+          duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
-          padding: EdgeInsets.symmetric(
-            horizontal: widget.isSelected ? 14 : 10,
-            vertical: 8,
-          ),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           decoration: BoxDecoration(
             color: widget.isSelected
-                ? colors.primaryCyan
+                ? colors.accent.withValues(alpha: colors.isDark ? 0.14 : 0.10)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: widget.isSelected
-                ? [
-                    BoxShadow(
-                      color: colors.primaryCyan.withValues(alpha: 0.42),
-                      blurRadius: 16,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
+            borderRadius: BorderRadius.circular(EwuRadius.card + 2),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 widget.isSelected ? widget.item.activeIcon : widget.item.icon,
                 size: 20,
-                color: widget.isSelected
-                    ? const Color(0xFF071426)
-                    : colors.secondaryText,
+                color: fg,
               ),
-              if (widget.isSelected) ...[
-                const SizedBox(width: 6),
-                AnimatedDefaultTextStyle(
-                  duration: const Duration(milliseconds: 200),
-                  style: GoogleFonts.sora(
-                    color: const Color(0xFF071426),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
-                  child: Text(widget.item.label),
+              const SizedBox(height: 2),
+              Text(
+                widget.item.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: EwuText.caption(
+                  fg,
+                  weight: widget.isSelected ? FontWeight.w700 : FontWeight.w500,
                 ),
-              ],
+              ),
             ],
           ),
         ),
