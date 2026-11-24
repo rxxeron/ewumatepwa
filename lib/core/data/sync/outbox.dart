@@ -76,7 +76,14 @@ class ExecRejected extends ExecResult {
   const ExecRejected(this.reason);
 }
 
-/// Could not reach the server (or a transient server error). Stop and retry later.
+/// Could not reach the server because the device is offline/network dropped.
+/// Stop flushing without burning retry attempts so offline writes are never lost.
+class ExecOffline extends ExecResult {
+  final String error;
+  const ExecOffline(this.error);
+}
+
+/// Transient server error. Stop and retry later (counts toward [Outbox.maxAttempts]).
 class ExecRetryLater extends ExecResult {
   final String error;
   const ExecRetryLater(this.error);
@@ -121,7 +128,8 @@ class SupabaseOutboxExecutor implements OutboxExecutor {
       }
       return ExecRejected('unknown op kind $kind');
     } catch (e) {
-      if (isTransientNetworkError(e) || isTransientServerError(e)) return ExecRetryLater('$e');
+      if (isTransientNetworkError(e)) return ExecOffline('$e');
+      if (isTransientServerError(e)) return ExecRetryLater('$e');
       if (e is PostgrestException) return ExecRejected('${e.code ?? ''} ${e.message}'.trim());
       return ExecRetryLater('$e');
     }
@@ -222,6 +230,10 @@ class Outbox {
         case ExecRejected(:final reason):
           await _reject(next, reason);
           rejected++;
+        case ExecOffline(:final error):
+          await (db.update(db.outboxEntries)..where((t) => t.id.equals(next.id)))
+              .write(OutboxEntriesCompanion(lastError: Value(error)));
+          return FlushResult(sent, rejected, true);
         case ExecRetryLater(:final error):
           final attempts = next.attempts + 1;
           if (attempts >= maxAttempts) {
@@ -237,12 +249,18 @@ class Outbox {
   }
 
   Future<void> _reject(OutboxEntry e, String reason) => db.transaction(() async {
+        final scopes = <String>{};
         for (final s in _snapshots(e)) {
+          scopes.add(s.scope);
           if (s.data == null) {
             await db.deleteRow(s.tbl, s.rowId);
           } else {
             await db.putRow(tbl: s.tbl, rowId: s.rowId, scope: s.scope, semester: s.semester, data: s.data!);
           }
+        }
+        if (scopes.isNotEmpty) {
+          await (db.update(db.syncScopes)..where((t) => t.scope.isIn(scopes.toList())))
+              .write(const SyncScopesCompanion(version: Value(-1)));
         }
         await (db.update(db.outboxEntries)..where((t) => t.id.equals(e.id))).write(OutboxEntriesCompanion(
               status: const Value('failed'),

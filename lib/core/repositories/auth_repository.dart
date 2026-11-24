@@ -74,13 +74,16 @@ class AuthRepository {
     try {
       await _beforeSignOut?.call();
     } catch (_) {}
-    await _cache.clearAll();
     try {
-      await _supabase.auth.signOut();
-    } catch (e) {
-      // If the JWT is already invalid/expired, Supabase auth might throw.
-      // We still want to clear the local session so the user isn't stuck.
-      // So we catch and ignore it, allowing the logout process to finish locally.
+      await _cache.clearAll();
+    } catch (_) {}
+    try {
+      await _supabase.auth.signOut().timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Global sign-out failed (offline, expired JWT, or timeout): clear local session anyway.
+      try {
+        await _supabase.auth.signOut(scope: SignOutScope.local);
+      } catch (_) {}
     }
   }
 
@@ -167,7 +170,9 @@ class AuthRepository {
 AuthRepository authRepository(Ref ref) {
   final cache = ref.watch(cacheServiceProvider);
   return AuthRepository(ref.watch(supabaseClientProvider), cache, () async {
-    await ref.read(syncCoordinatorProvider)?.unregisterPush();
+    try {
+      await ref.read(syncCoordinatorProvider)?.unregisterPush().timeout(const Duration(seconds: 3));
+    } catch (_) {}
     await ref.read(appDatabaseProvider).clearUserData();
   });
 }

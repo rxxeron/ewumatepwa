@@ -24,12 +24,14 @@ class AdvisingState {
     String? generationId,
     bool? isGenerating,
     String? error,
+    bool clearError = false,
+    bool clearGenerationId = false,
   }) {
     return AdvisingState(
       selectedCourses: selectedCourses ?? this.selectedCourses,
-      generationId: generationId ?? this.generationId,
+      generationId: clearGenerationId ? null : (generationId ?? this.generationId),
       isGenerating: isGenerating ?? this.isGenerating,
-      error: error ?? this.error,
+      error: clearError ? null : (error ?? this.error),
     );
   }
 }
@@ -49,11 +51,11 @@ class AdvisingNotifier extends _$AdvisingNotifier {
     } else {
       updated[code] = [];
     }
-    state = state.copyWith(selectedCourses: updated, error: null);
+    state = state.copyWith(selectedCourses: updated, clearError: true);
   }
 
   void resumeGeneration(String id) {
-    state = state.copyWith(generationId: id, isGenerating: false, error: null);
+    state = state.copyWith(generationId: id, isGenerating: false, clearError: true);
   }
 
   void toggleFaculty(String code, String facultyInitial) {
@@ -79,7 +81,7 @@ class AdvisingNotifier extends _$AdvisingNotifier {
   }) async {
     if (state.selectedCourses.isEmpty) return;
 
-    state = state.copyWith(isGenerating: true, error: null, generationId: null);
+    state = state.copyWith(isGenerating: true, clearError: true, clearGenerationId: true);
 
     try {
       final apiService = ref.read(azureFunctionsServiceProvider);

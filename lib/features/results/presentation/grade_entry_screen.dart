@@ -12,6 +12,7 @@ import '../../../core/utils/grade_helper.dart';
 import '../../semester_progress/semester_summary_providers.dart';
 import '../../../core/models/grade_scale.dart';
 import '../../../core/utils/error_utils.dart';
+import '../../../core/data/data_providers.dart';
 import '../../../core/data/sync/scope_catalog.dart';
 import '../../auth/auth_providers.dart';
 import '../../../core/providers/supabase_provider.dart';
@@ -141,15 +142,22 @@ class _GradeEntryScreenState extends ConsumerState<GradeEntryScreen> {
         final grade = _selectedGrades[eid];
         if (grade == null) continue;
 
+        final status = grade == 'W'
+            ? 'withdrawn'
+            : (grade == 'I' ? 'incomplete' : 'completed');
         await ref.read(supabaseClientProvider)
             .from('enrollments')
             .update({
               'grade': grade,
               'grade_points': _getDynamicGradePoint(grade, scale, enrollment['semester_code'] ?? ''),
-              'status': 'completed',
+              'status': status,
             })
             .eq('id', eid);
       }
+
+      try {
+        await ref.read(syncCoordinatorProvider)?.syncNow(force: true).timeout(const Duration(seconds: 10));
+      } catch (_) {}
 
       ref.invalidate(pendingGradesProvider);
       ref.invalidate(requiresGradeEntryProvider);
@@ -266,6 +274,12 @@ class _GradeEntryScreenState extends ConsumerState<GradeEntryScreen> {
                           Text(
                             'No courses currently require grade submission.',
                             style: GoogleFonts.sora(color: AppColors.secondaryText, fontSize: 13),
+                          ),
+                          const SizedBox(height: 20),
+                          FilledButton(
+                            onPressed: () => context.go('/dashboard'),
+                            style: FilledButton.styleFrom(backgroundColor: AppColors.primaryCyan, foregroundColor: Colors.black),
+                            child: Text('Continue to Dashboard', style: GoogleFonts.sora(fontWeight: FontWeight.w700)),
                           ),
                         ],
                       ),

@@ -156,7 +156,7 @@ class CourseMarksController {
     } else if (strategy == 'sum_all') {
       total = marks.reduce((a, b) => a + b);
     }
-    return total > maxMark ? maxMark : total;
+    return (maxMark > 0 && total > maxMark) ? maxMark : total;
   }
 
   double calculateQuizzes(List<TextEditingController> ctrls) {
@@ -289,14 +289,52 @@ class CourseMarksController {
           obtained: double.tryParse(obtClassPerfCtrl.text) ?? 0,
           max: double.tryParse(distClassPerfCtrl.text) ?? 0,
         ),
+      if ((double.tryParse(distOpt1Ctrl.text) ?? 0) > 0)
+        AssessmentCategoryItem(
+          title: 'Optional 1',
+          obtained: double.tryParse(obtOpt1Ctrl.text) ?? 0,
+          max: double.tryParse(distOpt1Ctrl.text) ?? 0,
+        ),
+      if ((double.tryParse(distOpt2Ctrl.text) ?? 0) > 0)
+        AssessmentCategoryItem(
+          title: 'Optional 2',
+          obtained: double.tryParse(obtOpt2Ctrl.text) ?? 0,
+          max: double.tryParse(distOpt2Ctrl.text) ?? 0,
+        ),
+      if ((double.tryParse(distOpt3Ctrl.text) ?? 0) > 0)
+        AssessmentCategoryItem(
+          title: 'Optional 3',
+          obtained: double.tryParse(obtOpt3Ctrl.text) ?? 0,
+          max: double.tryParse(distOpt3Ctrl.text) ?? 0,
+        ),
     ];
   }
 
   double getEvaluatedMax() {
     double sum = 0;
-    for (final item in getBreakdownItems()) {
-      if (item.obtained > 0) sum += item.max;
+    void addIfEntered(TextEditingController dist, TextEditingController obt) {
+      final m = double.tryParse(dist.text) ?? 0;
+      if (m > 0 && obt.text.trim().isNotEmpty) sum += m;
     }
+
+    addIfEntered(distMidCtrl, obtMidCtrl);
+    addIfEntered(distFinalCtrl, obtFinalCtrl);
+    addIfEntered(distAttendanceCtrl, obtAttendanceCtrl);
+    addIfEntered(distAssignmentCtrl, obtAssignmentCtrl);
+    addIfEntered(distPresentationCtrl, obtPresentationCtrl);
+    addIfEntered(distLabCtrl, obtLabCtrl);
+    addIfEntered(distProjectCtrl, obtProjectCtrl);
+    addIfEntered(distVivaCtrl, obtVivaCtrl);
+    addIfEntered(distTermPaperCtrl, obtTermPaperCtrl);
+    addIfEntered(distClassPerfCtrl, obtClassPerfCtrl);
+    addIfEntered(distOpt1Ctrl, obtOpt1Ctrl);
+    addIfEntered(distOpt2Ctrl, obtOpt2Ctrl);
+    addIfEntered(distOpt3Ctrl, obtOpt3Ctrl);
+
+    final qMax = double.tryParse(distQuizCtrl.text) ?? 0;
+    if (qMax > 0 && obtQuizzesCtrls.any((c) => c.text.trim().isNotEmpty)) sum += qMax;
+    final sqMax = double.tryParse(distShortQuizCtrl.text) ?? 0;
+    if (sqMax > 0 && obtShortQuizzesCtrls.any((c) => c.text.trim().isNotEmpty)) sum += sqMax;
     return sum;
   }
 
@@ -346,14 +384,10 @@ class CourseMarksController {
     if (data['marks_data'] == null) data['marks_data'] = {};
     data['marks_data']['short_quiz_strategy'] = shortQuizStrategy;
     
-    // SAFE MERGE: Preserve all existing marked dates and types so previous records are never erased
-    final existingAttendance = Map<String, dynamic>.from(data['marks_data']['attendance'] ?? {});
-    final existingDates = Map<String, dynamic>.from(existingAttendance['dates'] ?? {});
-    final existingTypes = Map<String, dynamic>.from(existingAttendance['types'] ?? {});
-
+    // Persist the current attendance map directly so unmarked dates stay removed.
     data['marks_data']['attendance'] = {
-      'dates': <String, dynamic>{...existingDates, ...markedDates},
-      'types': <String, dynamic>{...existingTypes, ...dateTypes},
+      'dates': Map<String, dynamic>.from(markedDates),
+      'types': Map<String, dynamic>.from(dateTypes),
     };
     data['short_quiz_n'] = int.tryParse(shortQuizNCtrl.text) ?? 1;
 

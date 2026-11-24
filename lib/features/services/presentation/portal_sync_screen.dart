@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -180,7 +181,7 @@ class _PortalSyncScreenState extends ConsumerState<PortalSyncScreen>
     // Save/clear credentials locally on device according to _rememberCredentials (zero DB transmission)
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (_rememberCredentials) {
+      if (_rememberCredentials && !kIsWeb) {
         await prefs.setBool('portal_remember_credentials', true);
         await prefs.setString('portal_local_saved_id', studentId);
         await prefs.setString('portal_local_saved_password', password);
@@ -235,9 +236,13 @@ class _PortalSyncScreenState extends ConsumerState<PortalSyncScreen>
         }
       }
 
+      final token = Supabase.instance.client.auth.currentSession?.accessToken;
       final azureRes = await http.post(
         Uri.parse('${AppConfig.getAzureFunctionUrl}/api/portal_sync_student'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
         body: jsonEncode(requestPayload),
       ).timeout(const Duration(seconds: 35));
 
@@ -246,8 +251,14 @@ class _PortalSyncScreenState extends ConsumerState<PortalSyncScreen>
       t3.cancel();
 
       if (azureRes.statusCode != 200) {
-        final errBody = jsonDecode(azureRes.body);
-        throw Exception(errBody['error'] ?? errBody['message'] ?? 'Failed to connect to EWU portal.');
+        String msg = 'Failed to connect to EWU portal (HTTP ${azureRes.statusCode}).';
+        try {
+          final errBody = jsonDecode(azureRes.body);
+          if (errBody is Map) {
+            msg = errBody['error']?.toString() ?? errBody['message']?.toString() ?? msg;
+          }
+        } catch (_) {}
+        throw Exception(msg);
       }
 
       final data = jsonDecode(azureRes.body) as Map<String, dynamic>;

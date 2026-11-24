@@ -139,7 +139,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 name: 'FacultyDetails',
                 path: 'details',
                 builder: (context, state) {
-                  final faculty = state.extra as Faculty;
+                  final faculty = state.extra is Faculty ? state.extra as Faculty : null;
+                  if (faculty == null) return const FacultyDirectoryScreen();
                   return FacultyDetailsScreen(faculty: faculty);
                 },
               ),

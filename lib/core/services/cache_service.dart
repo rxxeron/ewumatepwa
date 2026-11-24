@@ -112,13 +112,17 @@ class CacheService {
   }
 
   Future<void> clearAll() async {
-    await Hive.box(_profileBox).clear();
-    await Hive.box(_dashboardBox).clear();
-    await Hive.box(_scheduleBox).clear();
-    await Hive.box(_syncQueueBox).clear();
-    await Hive.box(_semesterProgressBox).clear();
-    await Hive.box(_notificationsBox).clear();
-    if (Hive.isBoxOpen(_authBox)) await Hive.box(_authBox).clear();
+    for (final name in [
+      _profileBox,
+      _dashboardBox,
+      _scheduleBox,
+      _syncQueueBox,
+      _semesterProgressBox,
+      _notificationsBox,
+      _authBox,
+    ]) {
+      if (Hive.isBoxOpen(name)) await Hive.box(name).clear();
+    }
     // Note: We keep global data like 'course_catalog' and 'faculty' intact
   }
 
