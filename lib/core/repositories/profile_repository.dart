@@ -12,6 +12,7 @@ import '../data/sync/outbox.dart';
 import '../data/sync/scope_catalog.dart';
 import '../models/profile.dart';
 import '../providers/supabase_provider.dart';
+import '../services/telemetry_service.dart';
 import '../utils/course_utils.dart';
 
 part 'profile_repository.g.dart';
@@ -233,6 +234,18 @@ class ProfileRepository {
   Future<void> recordActivity(String userId) async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
+      final localProfile = await _db.getRow('profiles', userId);
+      await TelemetryService.identifyUser(
+        userId,
+        email: _supabase.auth.currentUser?.email,
+        properties: {
+          'app_version': packageInfo.version,
+          if (localProfile?['program_id'] != null) 'program_id': '${localProfile!['program_id']}',
+          if (localProfile?['admitted_semester'] != null) 'admitted_semester': '${localProfile!['admitted_semester']}',
+          if (localProfile?['onboarding_status'] != null) 'onboarding_status': '${localProfile!['onboarding_status']}',
+          if (localProfile?['track'] != null) 'track': '${localProfile!['track']}',
+        },
+      );
       await _supabase.rpc('record_app_open', params: {
         'p_user_id': userId,
         'p_app_version': packageInfo.version,

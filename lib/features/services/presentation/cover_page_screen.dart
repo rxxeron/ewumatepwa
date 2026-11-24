@@ -17,6 +17,7 @@ import 'package:ewumate/core/utils/course_utils.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/widgets/glass_kit.dart';
 import '../../../core/config/supabase_config.dart';
+import '../../../core/services/telemetry_service.dart';
 
 
 class CoverPageScreen extends ConsumerStatefulWidget {
@@ -286,6 +287,13 @@ class _CoverPageScreenState extends ConsumerState<CoverPageScreen> {
       if (response != null && response.statusCode == 200) {
         final bytes = response.bodyBytes;
         final fileName = 'EWUmate_${_selectedTemplate}_${DateTime.now().millisecondsSinceEpoch}.pdf';
+        TelemetryService.trackEvent(
+          'cover_page_generated',
+          properties: {
+            'template': _selectedTemplate,
+            'course_code': _courseCode,
+          },
+        );
         
         if (kIsWeb) {
           // Web / PWA browser environment: trigger native browser blob download
@@ -316,7 +324,8 @@ class _CoverPageScreenState extends ConsumerState<CoverPageScreen> {
       } else {
         throw 'Server returned error: ${response?.body ?? "Unknown error"}';
       }
-    } catch (e) {
+    } catch (e, st) {
+      TelemetryService.recordError(e, st, context: 'cover_page_pdf');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

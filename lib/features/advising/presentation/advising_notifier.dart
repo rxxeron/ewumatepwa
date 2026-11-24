@@ -2,6 +2,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../core/services/azure_functions_service.dart';
 import '../../../core/repositories/schedule_repository.dart';
 import '../../../core/repositories/auth_repository.dart';
+import '../../../core/services/telemetry_service.dart';
 import '../../../core/utils/error_utils.dart';
 
 part 'advising_notifier.g.dart';
@@ -120,10 +121,15 @@ class AdvisingNotifier extends _$AdvisingNotifier {
         semesterCode: semesterCode,
         combinationData: combination,
       );
+      TelemetryService.trackEvent(
+        'advising_plan_saved',
+        properties: {'semester': semesterCode},
+      );
       
       // Refresh the saved schedules list if any provider is watching it
       // ref.invalidate(savedSchedulesProvider); 
-    } catch (e) {
+    } catch (e, st) {
+      TelemetryService.recordError(e, st, context: 'advising_save_schedule');
       state = state.copyWith(error: AuthErrorUtils.getFriendlyMessage(e));
     }
   }

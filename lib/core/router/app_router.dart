@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:posthog_flutter/posthog_flutter.dart';
 
 import '../data/data_providers.dart';
 
@@ -66,6 +67,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final router = GoRouter(
     navigatorKey: rootNavigatorKey,
     initialLocation: '/',
+    observers: [PosthogObserver()],
     refreshListenable: refreshListenable,
     redirect: (context, state) {
       final pwaState = ref.read(pwaControllerProvider);

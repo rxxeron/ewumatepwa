@@ -7,6 +7,7 @@ import 'core/config/supabase_config.dart';
 import 'core/router/app_router.dart';
 import 'core/services/cache_service.dart';
 import 'core/services/fcm_service.dart';
+import 'core/services/telemetry_service.dart';
 import 'firebase_options.dart';
 import 'core/providers/session_guardian.dart';
 import 'core/services/update_service.dart';
@@ -46,6 +47,9 @@ Future<void> _bootloader(CacheService cache) async {
   } catch (e) {
     if (kDebugMode) debugPrint('[Boot] Supabase init error: $e');
   }
+
+  // 4. PostHog Telemetry & Error Tracking
+  await TelemetryService.init();
 }
 
 void main() async {

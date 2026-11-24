@@ -22,6 +22,14 @@ class AppConfig {
     final val = _env('GOOGLE_WEB_CLIENT_ID');
     return val.isNotEmpty ? val : '561956344734-ulqeqls9u4h1hmpec41l9lufk336a9ga.apps.googleusercontent.com';
   }
+  static String get getPosthogApiKey {
+    final val = _env('POSTHOG_API_KEY');
+    return val.isNotEmpty ? val : 'phc_yyBXNRaiyqLStVyYB5xh69TpSZQL6R2YveZXNH4ntAiy';
+  }
+  static String get getPosthogHost {
+    final val = _env('POSTHOG_HOST');
+    return val.isNotEmpty ? val : 'https://us.i.posthog.com';
+  }
 }
 
 class SupabaseConfig {

@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/services/portal_service.dart';
+import '../../../core/services/telemetry_service.dart';
 import '../../../core/config/supabase_config.dart';
 import '../../../core/utils/course_utils.dart';
 import '../../../core/widgets/ewumate_app_bar.dart';
@@ -193,6 +194,8 @@ class _PortalSyncScreenState extends ConsumerState<PortalSyncScreen>
     } catch (e) {
       debugPrint('[PortalSyncScreen] Error saving local credentials: $e');
     }
+
+    TelemetryService.trackEvent('portal_sync_started');
 
     setState(() {
       _errorMessage = null;
@@ -555,12 +558,24 @@ class _PortalSyncScreenState extends ConsumerState<PortalSyncScreen>
 
       ref.invalidate(profileProvider);
 
+      TelemetryService.trackEvent(
+        'portal_sync_completed',
+        properties: {
+          'enrolled_count': _portalData?.enrolledCourses.length ?? 0,
+        },
+      );
+
       if (mounted) {
         setState(() {
           _currentStep = PortalSyncStep.syncComplete;
         });
       }
-    } catch (e) {
+    } catch (e, st) {
+      TelemetryService.trackEvent(
+        'portal_sync_failed',
+        properties: {'reason': e.toString()},
+      );
+      TelemetryService.recordError(e, st, context: 'portal_sync');
       if (mounted) {
         setState(() {
           _currentStep = PortalSyncStep.dataPreview;

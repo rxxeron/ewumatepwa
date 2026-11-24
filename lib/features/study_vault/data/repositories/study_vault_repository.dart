@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/services/telemetry_service.dart';
 import '../models/study_material.dart';
 
 final studyVaultRepositoryProvider = Provider<StudyVaultRepository>((ref) {
@@ -152,6 +153,14 @@ class StudyVaultRepository {
     }
 
     final primaryId = inserted['id'] as String;
+    TelemetryService.trackEvent(
+      'study_material_uploaded',
+      properties: {
+        'course_code': normalizedCourseCode ?? '',
+        'file_type': fileType ?? '',
+        'is_duplicate': isDuplicate,
+      },
+    );
 
     // 2. Fetch if this course has a "same_course" mapped equivalent
     String? sameCourseCode;

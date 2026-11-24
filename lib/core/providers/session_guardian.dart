@@ -8,6 +8,7 @@ import '../providers/supabase_provider.dart';
 /// ensures that the session is refreshed properly and persistent.
 import '../repositories/profile_repository.dart';
 import '../services/fcm_service.dart';
+import '../services/telemetry_service.dart';
 
 /// The Session Guardian monitors the Supabase auth state and 
 /// ensures that the session is refreshed properly and persistent.
@@ -39,6 +40,10 @@ class SessionGuardian {
     if (!_handled.add(userId)) return;
     _profileRepo.recordActivity(userId);
     _fcmService.syncToken();
+    TelemetryService.identifyUser(
+      userId,
+      email: _client.auth.currentUser?.email,
+    );
   }
 
   void _init() {
@@ -60,6 +65,7 @@ class SessionGuardian {
       }
       if (event == AuthChangeEvent.signedOut) {
         _handled.clear();
+        TelemetryService.resetUser();
       }
 
       switch (event) {
