@@ -230,7 +230,7 @@ class ProfileRepository {
 
   Stream<Profile?> streamProfile(String userId) => _db.watchRow('profiles', userId).map(_parse);
 
-  /// Once per app run (SessionGuardian). Online only; skipped silently offline.
+  /// Once per app run (SessionGuardian). Identifies user and records version/session in PostHog.
   Future<void> recordActivity(String userId) async {
     try {
       final packageInfo = await PackageInfo.fromPlatform();
@@ -246,10 +246,10 @@ class ProfileRepository {
           if (localProfile?['track'] != null) 'track': '${localProfile!['track']}',
         },
       );
-      await _supabase.rpc('record_app_open', params: {
-        'p_user_id': userId,
-        'p_app_version': packageInfo.version,
-      });
+      await TelemetryService.trackEvent(
+        'app_session_started',
+        properties: {'app_version': packageInfo.version},
+      );
     } catch (e) {
       if (kDebugMode) debugPrint('Failed to record activity: $e');
     }
