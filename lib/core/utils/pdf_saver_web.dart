@@ -1,12 +1,17 @@
-// ignore_for_file: avoid_web_libraries_in_flutter, deprecated_member_use
+import 'dart:js_interop';
 import 'dart:typed_data';
-import 'dart:html' as html;
+import 'package:web/web.dart' as web;
 
 Future<void> saveAndOpenPdf(Uint8List bytes, String fileName) async {
-  final blob = html.Blob([bytes], 'application/pdf');
-  final url = html.Url.createObjectUrlFromBlob(blob);
-  html.AnchorElement(href: url)
-    ..setAttribute("download", fileName)
-    ..click();
-  html.Url.revokeObjectUrl(url);
+  final blob = web.Blob(
+    [bytes.toJS].toJS,
+    web.BlobPropertyBag(type: 'application/pdf'),
+  );
+  final url = web.URL.createObjectURL(blob);
+  final anchor = web.HTMLAnchorElement()
+    ..href = url
+    ..target = '_blank'
+    ..download = fileName;
+  anchor.click();
+  web.URL.revokeObjectURL(url);
 }

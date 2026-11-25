@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 import 'dart:io';
-import 'package:universal_html/html.dart' as html;
+import '../../../core/utils/pdf_saver.dart';
 import 'package:ewumate/core/providers/academic_providers.dart';
 import 'package:ewumate/core/repositories/auth_repository.dart';
 import 'package:ewumate/core/repositories/profile_repository.dart';
@@ -296,14 +296,8 @@ class _CoverPageScreenState extends ConsumerState<CoverPageScreen> {
         );
         
         if (kIsWeb) {
-          // Web / PWA browser environment: trigger native browser blob download
-          final blob = html.Blob([bytes], 'application/pdf');
-          final url = html.Url.createObjectUrlFromBlob(blob);
-          final anchor = html.AnchorElement(href: url)
-            ..target = '_blank'
-            ..download = fileName;
-          anchor.click();
-          html.Url.revokeObjectUrl(url);
+          // Web / PWA browser environment: trigger Wasm-safe browser blob download
+          await saveAndOpenPdf(bytes, fileName);
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
